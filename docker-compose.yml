@@ -26,13 +26,10 @@ services:
       S3_PATH_STYLE: "${S3_PATH_STYLE:-true}"
       S3_PUBLIC_BASE_URL: "${S3_PUBLIC_BASE_URL:-}"
     volumes:
-      - ai-doc-storage:/app/storage
+      - ./storage:/app/storage
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 5s
-
-volumes:
-  ai-doc-storage:

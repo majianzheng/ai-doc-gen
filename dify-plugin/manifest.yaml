@@ -1,8 +1,6 @@
 version: 0.0.1
 type: plugin
-author:
-  name: ai-doc
-  email: admin@example.com
+author: ai-doc
 name: document_generator
 description:
   en_US: Generate Office & PDF documents (Word/PDF/Excel/PPT) via the ai-doc MCP service and return a public download link.

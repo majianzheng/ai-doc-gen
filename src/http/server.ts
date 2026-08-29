@@ -17,6 +17,19 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
   const app = express();
   app.use(express.json({ limit: MAX_BODY }));
 
+  // ---- CORS (browser-based MCP discovery/preflight from Dify) ----
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Accept, mcp-session-id, mcp-protocol-version');
+    res.header('Access-Control-Expose-Headers', 'mcp-session-id');
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+
   // ---- MCP (Streamable HTTP) ----
   const transports = new Map<string, StreamableHTTPServerTransport>();
   const mcpPath = config.mcpPath;

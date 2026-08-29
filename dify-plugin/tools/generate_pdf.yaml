@@ -4,59 +4,63 @@ identity:
   label:
     en_US: Generate PDF
     zh_Hans: 生成 PDF
-  description:
-    human:
-      en_US: Create a PDF document from a title, ordered paragraphs (headings, bullets, alignment) and tables, with an optional footer. Returns a public download link.
-      zh_Hans: 根据标题、有序段落(标题/项目符号/对齐)和表格生成 PDF,可选页脚,返回公开下载链接。
-    llm: Create a PDF document. Provide structured content: title, paragraphs (with optional level 1-6 headings, bold, italic, bullet, align, fontSize, color), and tables (columns + rows). The tool returns a JSON object with a public download url.
 parameters:
-  - name: base_url
-    type: string
-    required: true
-    label:
-      en_US: Service Base URL
-      zh_Hans: 服务地址
-    human_description:
-      en_US: Base URL of the ai-doc HTTP service, e.g. http://127.0.0.1:3000
-      zh_Hans: ai-doc HTTP 服务地址,例如 http://127.0.0.1:3000
-    placeholder:
-      en_US: http://127.0.0.1:3000
-    form: form
-  - name: title
-    type: string
-    required: false
-    label:
-      en_US: Title
-      zh_Hans: 标题
-    form: llm
-  - name: author
-    type: string
-    required: false
-    label:
-      en_US: Author
-    form: llm
-  - name: subject
-    type: string
-    required: false
-    label:
-      en_US: Subject
-    form: llm
-  - name: paragraphs
-    type: array
-    required: false
-    label:
-      en_US: Paragraphs
-      zh_Hans: 段落
-    form: llm
-  - name: tables
-    type: array
-    required: false
-    label:
-      en_US: Tables
-    form: llm
-  - name: footer
-    type: string
-    required: false
-    label:
-      en_US: Footer
-    form: llm
+- name: base_url
+  type: string
+  required: true
+  label:
+    en_US: Service Base URL
+    zh_Hans: 服务地址
+  human_description:
+    en_US: Base URL of the ai-doc HTTP service, e.g. http://127.0.0.1:3000
+    zh_Hans: ai-doc HTTP 服务地址,例如 http://127.0.0.1:3000
+  placeholder:
+    en_US: http://127.0.0.1:3000
+  form: form
+- name: title
+  type: string
+  required: false
+  label:
+    en_US: Title
+    zh_Hans: 标题
+  form: llm
+- name: author
+  type: string
+  required: false
+  label:
+    en_US: Author
+  form: llm
+- name: subject
+  type: string
+  required: false
+  label:
+    en_US: Subject
+  form: llm
+- name: paragraphs
+  type: array
+  required: false
+  label:
+    en_US: Paragraphs
+    zh_Hans: 段落
+  form: llm
+- name: tables
+  type: array
+  required: false
+  label:
+    en_US: Tables
+  form: llm
+- name: footer
+  type: string
+  required: false
+  label:
+    en_US: Footer
+  form: llm
+description:
+  human:
+    en_US: Create a PDF document from a title, ordered paragraphs (headings, bullets,
+      alignment) and tables, with an optional footer. Returns a public download link.
+    zh_Hans: 根据标题、有序段落(标题/项目符号/对齐)和表格生成 PDF,可选页脚,返回公开下载链接。
+  llm: 'Create a PDF document. Provide structured content: title, paragraphs (with
+    optional level 1-6 headings, bold, italic, bullet, align, fontSize, color), and
+    tables (columns + rows). The tool returns a JSON object with a public download
+    url.'
