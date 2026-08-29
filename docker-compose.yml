@@ -1,0 +1,38 @@
+services:
+  ai-doc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-doc:latest
+    container_name: ai-doc
+    restart: unless-stopped
+    ports:
+      - "${PORT:-9100}:9000"
+    environment:
+      # Plain Node env vars (defaults match local dev). Override via .env on the server.
+      DOC_MCP_TRANSPORT: "${DOC_MCP_TRANSPORT:-http}"
+      VERBOSE: "${VERBOSE:-false}"
+      HOST: "${HOST:-0.0.0.0}"
+      PORT: "9000"
+      STORAGE_MODE: "${STORAGE_MODE:-local}"
+      LOCAL_STORAGE_DIR: "${LOCAL_STORAGE_DIR:-/app/storage}"
+      LOCAL_PUBLIC_BASE_URL: "${LOCAL_PUBLIC_BASE_URL:-http://localhost:${PORT:-9000}}"
+      # S3-compatible object storage (uncomment / fill in .env to use)
+      S3_ENDPOINT: "${S3_ENDPOINT:-}"
+      S3_REGION: "${S3_REGION:-us-east-1}"
+      S3_ACCESS_KEY: "${S3_ACCESS_KEY:-}"
+      S3_SECRET_KEY: "${S3_SECRET_KEY:-}"
+      S3_BUCKET: "${S3_BUCKET:-ai-doc}"
+      S3_PATH_STYLE: "${S3_PATH_STYLE:-true}"
+      S3_PUBLIC_BASE_URL: "${S3_PUBLIC_BASE_URL:-}"
+    volumes:
+      - ai-doc-storage:/app/storage
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  ai-doc-storage:

@@ -1,0 +1,18 @@
+identity:
+  author: ai-doc
+  name: document_generator
+  label:
+    en_US: AI-Doc Document Generator
+    zh_Hans: AI-Doc 文档生成
+  description:
+    en_US: Generate Office & PDF documents through the ai-doc MCP service and return public download links.
+    zh_Hans: 通过 ai-doc 服务生成 Office/PDF 文档并返回下载链接。
+icon: icon.svg
+tools:
+  - tools/generate_docx.yaml
+  - tools/generate_pdf.yaml
+  - tools/generate_xlsx.yaml
+  - tools/generate_pptx.yaml
+extra:
+  python:
+    source: provider/document_generator.py

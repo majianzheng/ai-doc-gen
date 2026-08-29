@@ -1,0 +1,50 @@
+{
+  "name": "ai-doc",
+  "version": "1.0.0",
+  "description": "Document generation MCP service - generate Word/PDF/Excel/PPT with AI agents and return download links",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ai-doc": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "start:http": "cross-env DOC_MCP_TRANSPORT=http node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "dev:http": "cross-env DOC_MCP_TRANSPORT=http tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "mcp",
+    "document",
+    "docx",
+    "pdf",
+    "xlsx",
+    "pptx",
+    "dify"
+  ],
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "docx": "^9.1.1",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "pdfkit": "^0.15.2",
+    "pptxgenjs": "^3.12.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.2",
+    "@types/pdfkit": "^0.13.5",
+    "cross-env": "^7.0.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,40 @@
+identity:
+  name: generate_xlsx
+  author: ai-doc
+  label:
+    en_US: Generate Excel (.xlsx)
+    zh_Hans: 生成 Excel (.xlsx)
+  description:
+    human:
+      en_US: Create an Excel workbook with one or more sheets of tabular data (auto-styled header). Returns a public download link.
+      zh_Hans: 根据一个或多个工作表数据生成 Excel(.xlsx),自动美化表头,返回公开下载链接。
+    llm: Create an Excel (.xlsx) workbook. Provide sheets: [{name, columns:[{key,header}], rows:[{key:value}]}]. The tool returns a JSON object with a public download url.
+parameters:
+  - name: base_url
+    type: string
+    required: true
+    label:
+      en_US: Service Base URL
+      zh_Hans: 服务地址
+    human_description:
+      en_US: Base URL of the ai-doc HTTP service, e.g. http://127.0.0.1:3000
+      zh_Hans: ai-doc HTTP 服务地址,例如 http://127.0.0.1:3000
+    placeholder:
+      en_US: http://127.0.0.1:3000
+    form: form
+  - name: title
+    type: string
+    required: false
+    label:
+      en_US: Title
+    form: llm
+  - name: sheets
+    type: array
+    required: true
+    label:
+      en_US: Sheets
+      zh_Hans: 工作表
+    human_description:
+      en_US: One or more sheets. Each item: {name, columns:[{key,header}], rows:[{key:value}]}.
+      zh_Hans: 一个或多个工作表。每项:{name 名称, columns 列定义[{key,header}], rows 行数据[{key:value}]}。
+    form: llm

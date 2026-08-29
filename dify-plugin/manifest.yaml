@@ -1,0 +1,36 @@
+version: 0.0.1
+type: plugin
+author:
+  name: ai-doc
+  email: admin@example.com
+name: document_generator
+description:
+  en_US: Generate Office & PDF documents (Word/PDF/Excel/PPT) via the ai-doc MCP service and return a public download link.
+  zh_Hans: 通过 ai-doc 服务生成 Office/PDF 文档(Word/PDF/Excel/PPT)并返回下载链接。
+  pt_BR: ''
+  ja_JP: ''
+  ko_KR: ''
+icon: icon.svg
+label:
+  en_US: AI-Doc Document Generator
+  zh_Hans: AI-Doc 文档生成
+created_at: '2026-08-28T00:00:00Z'
+resource:
+  memory: 268435456
+  permission:
+    tool:
+      enabled: true
+    storage:
+      enabled: true
+plugins:
+  tools:
+    - provider/document_generator.yaml
+meta:
+  version: 0.0.1
+  arch:
+    - amd64
+    - arm64
+  runner:
+    language: python
+    version: '3.12'
+    entrypoint: main

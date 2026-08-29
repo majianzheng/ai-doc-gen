@@ -1,0 +1,14 @@
+node_modules/
+dist/
+storage/
+*.log
+.env
+.dify/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# lockfiles
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
