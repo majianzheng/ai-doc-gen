@@ -48,7 +48,7 @@ Write-Host "==> Ensuring remote directory exists" -ForegroundColor Cyan
 ssh.exe $Server "mkdir -p '$RemotePath'"
 
 # 2. Transfer build context (no lockfiles; .dockerignore excludes them on the server)
-$files = @('Dockerfile', 'docker-compose.yml', '.dockerignore', '.env.example', 'package.json', 'tsconfig.json', 'src')
+$files = @('Dockerfile', 'docker-compose.yml', '.dockerignore', '.env.example', 'package.json', 'tsconfig.json', 'src', 'scripts')
 foreach ($f in $files) {
     Write-Host "  -> $f" -ForegroundColor Gray
     scp.exe -r "$LocalPath\$f" "${Server}:$RemotePath/"
@@ -68,8 +68,25 @@ if (Test-Path "$LocalPath\.env") {
 }
 
 # 4. Build & start
-Write-Host "==> Running: docker compose up -d --build" -ForegroundColor Cyan
-ssh.exe $Server "cd '$RemotePath' && docker compose --progress=plain up -d --build"
+# Force a clean rebuild (--no-cache) so the image always reflects the latest
+# source. A plain `up --build` can otherwise reuse a cached `RUN npm run build`
+# layer and ship stale code.
+Write-Host "==> Running: docker compose build --no-cache && docker compose up -d" -ForegroundColor Cyan
+$tmpOut = Join-Path $env:TEMP "ai-doc-compose.out"
+$tmpErr = Join-Path $env:TEMP "ai-doc-compose.err"
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+& ssh.exe $Server "cd '$RemotePath' && docker compose build --no-cache && docker compose up -d" > $tmpOut 2> $tmpErr
+$exit = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+$composeOut = (Get-Content $tmpOut -ErrorAction SilentlyContinue) -join "`n"
+$composeErr = (Get-Content $tmpErr -ErrorAction SilentlyContinue) -join "`n"
+if ($exit -ne 0) {
+    Write-Host "ERROR: docker compose build/up failed:" -ForegroundColor Red
+    Write-Host $composeOut
+    Write-Host $composeErr
+    exit 1
+}
 
 # 5. Wait for health
 $Container = "ai-doc"   # container_name set in docker-compose.yml
@@ -94,14 +111,18 @@ if (-not $ok) {
 
 # Done
 $ip = $Server.Split('@')[-1]
-$portLine = ssh.exe $Server "docker port '$Container' 9000 2>/dev/null | Select-Object -First 1"
-$publicPort = if ($portLine -match ':(\d+)$') { $Matches[1] } else { '9000' }
+# NOTE: these commands run in the remote *bash* shell, so use `head`, not a PowerShell cmdlet.
+$portLine = ssh.exe $Server "docker port '$Container' 9000 2>/dev/null | head -1"
+$publicPort = if ($portLine -match ':(\d+)$') { $Matches[1] } else { '9100' }
+$adminPortLine = ssh.exe $Server "docker port '$Container' 9800 2>/dev/null | head -1"
+$adminPublicPort = if ($adminPortLine -match ':(\d+)$') { $Matches[1] } else { '9800' }
 
 Write-Host ""
 Write-Host "===== DEPLOY COMPLETE =====" -ForegroundColor Green
 Write-Host "  MCP endpoint   : http://$ip`:$publicPort/mcp"
 Write-Host "  REST API       : http://$ip`:$publicPort/api/documents/:format"
 Write-Host "  Health check   : http://$ip`:$publicPort/health"
+Write-Host "  Admin UI       : http://$ip`:$adminPublicPort/  (separate management port)"
 Write-Host ""
 Write-Host "  Remote path    : $RemotePath"
 Write-Host "  Container      : $Container"

@@ -20,6 +20,12 @@ export interface HttpConfig {
   host: string;
 }
 
+export interface AdminConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+}
+
 export type StorageMode = 's3' | 'local';
 
 export interface Config {
@@ -27,6 +33,11 @@ export interface Config {
   s3: S3Config | null;
   local: LocalConfig;
   http: HttpConfig;
+  admin: AdminConfig;
+  /** directory where the admin web UI persists document templates */
+  templateDir: string;
+  /** directory where uploaded file-based style templates (pptx/docx/xlsx) are stored */
+  styleTemplateDir: string;
   transport: 'stdio' | 'http';
   mcpPath: string;
   verbose: boolean;
@@ -67,11 +78,20 @@ export function loadConfig(): Config {
     ? 'stdio'
     : 'http';
 
+  const admin: AdminConfig = {
+    enabled: boolEnv('ADMIN_ENABLED', true),
+    host: process.env.ADMIN_HOST ?? '0.0.0.0',
+    port: Number(process.env.ADMIN_PORT ?? 9800),
+  };
+
   return {
     storageMode,
     s3,
     local,
     http,
+    admin,
+    templateDir: process.env.TEMPLATE_DIR ?? 'templates',
+    styleTemplateDir: process.env.STYLE_TEMPLATE_DIR ?? 'style-templates',
     transport,
     mcpPath: (process.env.MCP_PATH ?? '/mcp').replace(/^\/+/, '').replace(/^/, '/'),
     verbose: boolEnv('VERBOSE'),

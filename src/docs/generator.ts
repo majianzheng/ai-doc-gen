@@ -9,11 +9,16 @@ import type { DocFormat } from './types.js';
  * fully isolated from storage / transport concerns, which makes it trivial to
  * add a new format (e.g. `csv`, `md`) later.
  */
+export interface GenerateContext {
+  /** Raw bytes of an uploaded style template (pptx / docx / xlsx) to inherit styling from. */
+  styleTemplate?: Buffer;
+}
+
 export interface Generator<F extends DocFormat = DocFormat> {
   format: F;
   mimeType: string;
   extension: string;
   /** zod schema describing the accepted input for documentation / validation */
   inputSchema?: z.ZodTypeAny;
-  generate(input: unknown): Promise<Buffer>;
+  generate(input: unknown, ctx?: GenerateContext): Promise<Buffer>;
 }

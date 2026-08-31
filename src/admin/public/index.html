@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI-Doc 管理后台</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="logo">AI-Doc</span>
+        <span class="brand-sub">文档生成管理后台</span>
+      </div>
+      <div class="topbar-meta">
+        <span id="metaStorage" class="pill"></span>
+        <span id="metaTime" class="muted"></span>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="files">生成文件</button>
+      <button class="tab" data-tab="templates">内容模板</button>
+      <button class="tab" data-tab="styles">样式模板</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <!-- ============ 文件管理 ============ -->
+    <section id="view-files" class="view active">
+      <div class="toolbar">
+        <h2>生成的文档</h2>
+        <div class="toolbar-actions">
+          <input id="fileSearch" type="search" placeholder="按文件名 / 格式搜索…" />
+          <button id="fileRefresh" class="btn">刷新</button>
+        </div>
+      </div>
+      <div class="card">
+        <table class="table" id="fileTable">
+          <thead>
+            <tr>
+              <th>文件名</th>
+              <th>格式</th>
+              <th>大小</th>
+              <th>创建时间</th>
+              <th class="th-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="fileRows"></tbody>
+        </table>
+        <div id="fileEmpty" class="empty hidden">暂无生成文件</div>
+      </div>
+    </section>
+
+    <!-- ============ 模板定制 ============ -->
+    <section id="view-templates" class="view">
+      <div class="tpl-layout">
+        <div class="tpl-side">
+          <div class="toolbar">
+            <h2>模板库</h2>
+            <button id="tplNew" class="btn btn-primary">＋ 新建模板</button>
+          </div>
+          <div class="card">
+            <ul id="tplList" class="tpl-list"></ul>
+            <div id="tplEmpty" class="empty hidden">暂无模板</div>
+          </div>
+        </div>
+        <div class="tpl-main">
+          <div class="card editor-card">
+            <div class="editor-head">
+              <input id="tplName" type="text" placeholder="模板名称" />
+              <select id="tplFormat" title="文档格式">
+                <option value="docx">Word (.docx)</option>
+                <option value="pdf">PDF</option>
+                <option value="xlsx">Excel (.xlsx)</option>
+                <option value="pptx">PowerPoint (.pptx)</option>
+              </select>
+              <button id="tplSave" class="btn btn-primary">保存模板</button>
+              <button id="tplGenerate" class="btn btn-accent">生成文档</button>
+              <button id="tplDelete" class="btn btn-danger">删除</button>
+            </div>
+            <div class="editor-style">
+              <label for="tplStyle">套用样式模板</label>
+              <select id="tplStyle" title="套用样式模板">
+                <option value="">（不使用）</option>
+              </select>
+              <span id="tplStyleCurrent" class="tpl-style-current none">未套用样式模板</span>
+            </div>
+            <input id="tplDesc" type="text" placeholder="模板描述(可选)" class="editor-desc" />
+            <div class="editor-toolbar">
+              <button id="tplExample" class="btn btn-ghost">载入示例</button>
+              <button id="tplFormatJson" class="btn btn-ghost">格式化</button>
+              <button id="tplValidate" class="btn btn-ghost">校验</button>
+              <span id="tplStatus" class="editor-status"></span>
+            </div>
+            <div class="editor-label">输入 JSON(结构化文档内容)</div>
+            <textarea id="tplInput" class="editor-input" spellcheck="false"></textarea>
+            <div id="tplResult" class="result hidden"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 样式模板 ============ -->
+    <section id="view-styles" class="view">
+      <div class="toolbar">
+        <div class="toolbar-title">
+          <h2>样式模板</h2>
+          <span class="muted">上传真实文档文件(pptx / docx / xlsx)作为版式模板,生成同格式文档时即可套用其主题与样式</span>
+        </div>
+        <button id="styleRefresh" class="btn">刷新</button>
+      </div>
+      <div class="card">
+        <div class="style-upload">
+          <div class="style-upload-main">
+            <input id="styleName" type="text" placeholder="模板名称(可选)" />
+            <label class="style-file" for="styleFile">
+              <input id="styleFile" type="file" accept=".pptx,.docx,.xlsx" />
+              <span id="styleFileName" class="style-file-hint">选择要上传的文件…</span>
+            </label>
+            <span id="styleDetect" class="style-detect hidden"></span>
+            <button id="styleUpload" class="btn btn-primary">上传样式模板</button>
+          </div>
+          <div id="styleStatus" class="editor-status"></div>
+        </div>
+      </div>
+      <div class="card style-table-card">
+        <p class="style-tip">「当前使用」即该格式下生成文档时默认套用的样式模板。同一格式可上传多个模板, 点击「设为当前」切换; 也可在内容模板里单独指定。</p>
+        <table class="table" id="styleTable">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>格式</th>
+              <th>当前使用</th>
+              <th>文件名</th>
+              <th>大小</th>
+              <th class="th-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="styleRows"></tbody>
+        </table>
+        <div id="styleEmpty" class="empty hidden">暂无样式模板</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ 预览弹窗 ============ -->
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <h3 id="modalTitle">预览</h3>
+          <div id="modalMeta" class="muted small"></div>
+        </div>
+        <button id="modalClose" class="btn btn-ghost">关闭</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAction" class="modal-actions"></div>
+        <iframe id="modalFrame" class="modal-frame hidden"></iframe>
+        <div id="modalInfo" class="modal-info hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

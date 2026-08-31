@@ -7,7 +7,6 @@ storage
 *.log
 README.md
 .dify
-scripts
 
 # lockfiles (not needed for the Docker build context)
 package-lock.json

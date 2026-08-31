@@ -8,12 +8,16 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-9100}:9000"
+      - "${ADMIN_PORT:-9800}:9800"
     environment:
       # Plain Node env vars (defaults match local dev). Override via .env on the server.
       DOC_MCP_TRANSPORT: "${DOC_MCP_TRANSPORT:-http}"
       VERBOSE: "${VERBOSE:-false}"
       HOST: "${HOST:-0.0.0.0}"
       PORT: "9000"
+      ADMIN_ENABLED: "${ADMIN_ENABLED:-true}"
+      ADMIN_HOST: "${ADMIN_HOST:-0.0.0.0}"
+      ADMIN_PORT: "${ADMIN_PORT:-9800}"
       STORAGE_MODE: "${STORAGE_MODE:-local}"
       LOCAL_STORAGE_DIR: "${LOCAL_STORAGE_DIR:-/app/storage}"
       LOCAL_PUBLIC_BASE_URL: "${LOCAL_PUBLIC_BASE_URL:-http://localhost:${PORT:-9000}}"
@@ -27,6 +31,8 @@ services:
       S3_PUBLIC_BASE_URL: "${S3_PUBLIC_BASE_URL:-}"
     volumes:
       - ./storage:/app/storage
+      - ./templates:/app/templates
+      - ./style-templates:/app/style-templates
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s

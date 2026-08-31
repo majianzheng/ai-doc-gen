@@ -11,6 +11,13 @@ await client.connect(transport);
 
 const tools = await client.listTools();
 console.log('STDIO TOOLS:', tools.tools.length);
+for (const t of tools.tools) {
+  const d = t.description ?? '';
+  const first = d.split('\n').find((l) => l.trim().length > 0) ?? '';
+  console.log(`TOOL ${t.name} descLen=${d.length} | ${first.slice(0, 90)}`);
+  console.log(`  has-example=${d.includes('Example:')} has-images=${d.includes('images (array, optional)')}`);
+}
+console.log('TOOLS LIST DONE');
 
 const res = await client.callTool({ name: 'generate_excel_xlsx', arguments: { sheets: [{ name: 'Sheet1', rows: [{ a: 1, b: 'x' }] }] } });
 console.log('XLSX via stdio:', JSON.parse(res.content[0].text).url);

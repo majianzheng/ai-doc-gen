@@ -1,6 +1,40 @@
 import ExcelJS from 'exceljs';
-import type { SheetData, XlsxInput } from './types.js';
-import type { Generator } from './generator.js';
+import type { ImageItem, SheetData, XlsxInput } from './types.js';
+import type { Generator, GenerateContext } from './generator.js';
+import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
+
+/**
+ * Anchors images below the table data of a sheet. Excel stores images as
+ * floating objects; width/height are given in pixels via the tl/ext anchor.
+ * SVG input is rasterized to PNG (Excel cannot hold vector SVG as an image).
+ */
+async function writeSheetImages(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet, images: ImageItem[], dataRows: number): Promise<void> {
+  let nextRow = dataRows + 3;
+  for (const img of images) {
+    const resolved = await resolveImage(img);
+    let imgBuffer: Buffer | undefined;
+    let ext: 'png' | 'jpeg' = 'png';
+    if (resolved.kind === 'svg') {
+      const { png } = await svgToPng(resolved.buffer);
+      imgBuffer = png;
+      ext = 'png';
+    } else if (resolved.format === 'png') {
+      ext = 'png';
+    } else if (resolved.format === 'jpeg') {
+      ext = 'jpeg';
+    } else {
+      throw new Error(`image type '${resolved.format}' is not supported in Excel. Supported: PNG, JPEG, SVG.`);
+    }
+    const intrinsic = intrinsicSize(imgBuffer ?? resolved.buffer, ext);
+    const size = computeSize({ width: resolved.width, height: resolved.height }, intrinsic, 260);
+    const imageId = wb.addImage({ buffer: (imgBuffer ?? resolved.buffer) as never, extension: ext } as never);
+    ws.addImage(imageId, {
+      tl: { col: 0, row: nextRow },
+      ext: { width: Math.round(size.width), height: Math.round(size.height) },
+    });
+    nextRow += Math.ceil(size.height / 18) + 2;
+  }
+}
 
 function writeSheet(ws: ExcelJS.Worksheet, sheet: SheetData) {
   const cols = sheet.columns ?? Object.keys(sheet.rows[0] ?? {}).map((k) => ({ key: k, header: k }));
@@ -37,14 +71,29 @@ export const xlsxGenerator: Generator = {
   format: 'xlsx',
   mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   extension: 'xlsx',
-  async generate(input: XlsxInput): Promise<Buffer> {
+  async generate(input: XlsxInput, ctx?: GenerateContext): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
+    if (ctx?.styleTemplate) {
+      try {
+        await wb.xlsx.load(ctx.styleTemplate as never);
+        // Drop the template's own worksheets so we keep its theme/styles but
+        // avoid sheet-name collisions when we add the requested sheets.
+        for (const ws of wb.worksheets.slice()) {
+          ws.destroy();
+        }
+      } catch (err) {
+        console.warn('[ai-doc] failed to load xlsx style template, falling back to default styling:', (err as Error).message);
+      }
+    }
     wb.creator = 'ai-doc';
     wb.created = new Date();
 
     for (const sheet of input.sheets) {
       const ws = wb.addWorksheet(sheet.name || 'Sheet1');
       writeSheet(ws, sheet);
+      if (sheet.images?.length) {
+        await writeSheetImages(wb, ws, sheet.images, sheet.rows.length);
+      }
     }
 
     const buf = await wb.xlsx.writeBuffer();

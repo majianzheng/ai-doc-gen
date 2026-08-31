@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
-import { join, normalize } from 'node:path';
+import { normalize } from 'node:path';
 import express from 'express';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -98,13 +97,15 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
       res.status(400).json({ error: `Unsupported format '${format}'. Supported: docx, pdf, xlsx, pptx` });
       return;
     }
+    const styleTemplateId = (req.body as { styleTemplateId?: string } | undefined)?.styleTemplateId;
+    const filename = (req.body as { filename?: string } | undefined)?.filename;
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       res.status(422).json({ error: 'Validation failed', details: parsed.error.flatten() });
       return;
     }
     try {
-      const doc = await service.generate(format, parsed.data as never);
+      const doc = await service.generate(format, parsed.data as never, { styleTemplateId, filename });
       res.status(201).json(doc);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -130,20 +131,16 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
   // ---- static file serving (only when using local storage) ----
   if (config.storageMode === 'local' && storage instanceof LocalStorage) {
     const root = normalize(storage.rootDir());
-    app.use('/files', async (req, res) => {
+    // express.static maps /files/<key> -> <root>/<key> (handles nested paths
+    // and percent-encoding correctly). fallthrough lets us send a clean 404.
+    app.use('/files', express.static(root, { fallthrough: true, index: false }));
+    app.use('/files', (req, res) => {
       const decoded = decodeURIComponent(req.path);
-      const filePath = normalize(join(root, decoded));
-      if (!filePath.startsWith(root)) {
+      if (decoded.includes('..')) {
         res.status(403).send('Forbidden');
         return;
       }
-      try {
-        const s = await stat(filePath);
-        if (!s.isFile()) throw new Error('not a file');
-        res.sendFile(filePath);
-      } catch {
-        res.status(404).send('Not found');
-      }
+      res.status(404).send('Not found');
     });
   }
 

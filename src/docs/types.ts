@@ -19,12 +19,42 @@ export interface ParagraphItem {
   color?: string;
 }
 
+/**
+ * An image that can be embedded into a generated document. Exactly one source
+ * form must be provided:
+ *  - `data`: base64-encoded image bytes (optionally a full `data:` URI)
+ *  - `url`:   an http(s) URL the service downloads at generation time
+ *  - `svg`:   raw SVG (XML) markup
+ * Supported image types: PNG, JPEG, GIF, WebP (raster) and SVG.
+ * SVG stays vector in DOCX / PPTX; it is rasterized to PNG for PDF / XLSX.
+ */
+export interface ImageItem {
+  /** base64-encoded image bytes, optionally a full `data:` URI (e.g. data:image/png;base64,....) */
+  data?: string;
+  /** MIME type when `data` has no `data:` URI prefix (defaults to image/png) */
+  mimeType?: string;
+  /** http(s) URL to download the image from */
+  url?: string;
+  /** raw SVG (XML) markup */
+  svg?: string;
+  /** rendered width in px (omit to auto-size from the aspect ratio) */
+  width?: number;
+  /** rendered height in px (omit to auto-size from the aspect ratio) */
+  height?: number;
+  /** horizontal placement */
+  align?: 'left' | 'center' | 'right';
+  /** optional caption / figure text rendered underneath the image */
+  caption?: string;
+}
+
 export interface DocxInput {
   title?: string;
   author?: string;
   /** sections of the document body in order */
   paragraphs?: ParagraphItem[];
   tables?: TableData[];
+  /** images appended after the paragraphs/tables */
+  images?: ImageItem[];
   footer?: string;
 }
 
@@ -34,6 +64,8 @@ export interface PdfInput {
   subject?: string;
   paragraphs?: ParagraphItem[];
   tables?: TableData[];
+  /** images appended after the paragraphs/tables */
+  images?: ImageItem[];
   footer?: string;
 }
 
@@ -53,6 +85,8 @@ export interface SheetData {
   name: string;
   columns?: TableColumn[];
   rows: Record<string, string | number | boolean | null>[];
+  /** images anchored below the table data in this sheet */
+  images?: ImageItem[];
 }
 
 export interface XlsxInput {
@@ -64,6 +98,10 @@ export interface SlideData {
   title?: string;
   subtitle?: string;
   bullets?: string[];
+  /** renders a table below the title/text */
+  tables?: TableData[];
+  /** images rendered in the lower part of the slide */
+  images?: ImageItem[];
   layout?: 'title' | 'title_content';
   author?: string;
   footer?: string;

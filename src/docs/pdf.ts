@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
-import type { ParagraphItem, PdfInput } from './types.js';
-import type { Generator } from './generator.js';
+import type { ImageItem, ParagraphItem, PdfInput } from './types.js';
+import type { Generator, GenerateContext } from './generator.js';
+import { computeSize, resolveImage, svgToPng } from './images.js';
 
 function sizeFor(level: number | undefined): number {
   if (!level) return 11;
@@ -19,11 +20,64 @@ function fontStyle(p: ParagraphItem): { bold?: boolean; italics?: boolean; size:
   };
 }
 
+/**
+ * Normalize an image for PDF rendering. PDFKit supports PNG / JPEG natively;
+ * SVG input is rasterized to PNG, everything else is rejected with a clear
+ * message so the agent knows what to send instead.
+ */
+async function imageForPdf(resolved: Awaited<ReturnType<typeof resolveImage>>): Promise<{ buffer: Buffer; kind: 'png' | 'jpeg' }> {
+  if (resolved.kind === 'svg') {
+    const { png } = await svgToPng(resolved.buffer);
+    return { buffer: png, kind: 'png' };
+  }
+  if (resolved.format === 'png') return { buffer: resolved.buffer, kind: 'png' };
+  if (resolved.format === 'jpeg') return { buffer: resolved.buffer, kind: 'jpeg' };
+  throw new Error(
+    `image type '${resolved.format}' is not supported in PDF. Supported: PNG, JPEG, SVG. Convert the image to PNG/JPEG or send SVG markup.`,
+  );
+}
+
+function renderImages(doc: PDFKit.PDFDocument, images: ImageItem[]): Promise<void> {
+  const tasks = images.map(async (img) => {
+    const resolved = await resolveImage(img);
+    const renderable = await imageForPdf(resolved);
+
+    let intrinsic: { width: number; height: number } | null = null;
+    if (resolved.kind !== 'svg') {
+      try {
+        const opened = (doc as PDFKit.PDFDocument & { openImage: (src: Buffer) => { width: number; height: number } }).openImage(renderable.buffer);
+        intrinsic = { width: opened.width, height: opened.height };
+      } catch {
+        intrinsic = null;
+      }
+    }
+    const availW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const size = computeSize({ width: resolved.width, height: resolved.height }, intrinsic, Math.min(400, availW));
+    const dw = Math.min(size.width, availW);
+    const dh = size.height * (dw / size.width);
+
+    if (doc.y + dh > doc.page.height - doc.page.margins.bottom) doc.addPage();
+    let x = doc.page.margins.left;
+    if (resolved.align === 'center') x = (doc.page.width - dw) / 2;
+    else if (resolved.align === 'right') x = doc.page.width - doc.page.margins.right - dw;
+
+    doc.image(renderable.buffer, x, doc.y, { width: dw, height: dh });
+    doc.y += dh;
+    if (resolved.caption) {
+      doc.moveDown(0.2);
+      doc.font('Helvetica-Oblique').fontSize(9).fillColor('#666666')
+        .text(resolved.caption, { align: 'center' });
+    }
+    doc.moveDown(0.6);
+  });
+  return Promise.all(tasks).then(() => undefined);
+}
+
 export const pdfGenerator: Generator = {
   format: 'pdf',
   mimeType: 'application/pdf',
   extension: 'pdf',
-  generate(input: PdfInput): Promise<Buffer> {
+  generate(input: PdfInput, _ctx?: GenerateContext): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const info: Record<string, string | Date> = { Creator: 'ai-doc', CreationDate: new Date(), ModDate: new Date() };
       if (input.title) info.Title = input.title;
@@ -88,7 +142,8 @@ export const pdfGenerator: Generator = {
         doc.moveDown(0.6);
       }
 
-      doc.end();
+      const finish = () => { doc.end(); };
+      renderImages(doc, input.images ?? []).then(finish).catch((err) => doc.emit('error', err));
     });
   },
 };

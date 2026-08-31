@@ -1,6 +1,8 @@
 node_modules/
 dist/
 storage/
+templates/
+style-templates/
 *.log
 .env
 .dify/
@@ -12,3 +14,7 @@ __pycache__/
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+
+# local temp/verification artifacts (not part of the project)
+.remote-check/
+Presentation.pptx

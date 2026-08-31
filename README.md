@@ -1,4 +1,4 @@
-﻿# ai-doc — Document Generation MCP Service
+# ai-doc — Document Generation MCP Service
 
 将 **文档生成能力** 通过 **MCP (Model Context Protocol)** 开放给任意 AI Agent(Dify、Claude、OpenAI 等),支持生成 **Word (.docx) / PDF / Excel (.xlsx) / PowerPoint (.pptx)**,并把生成结果上传到 **对象存储(S3/MinIO/OSS/COS)** 或本地磁盘,最终以 **可下载链接** 的形式返回给 Agent。
 
@@ -12,6 +12,7 @@
 - **对象存储适配**:支持 AWS S3、MinIO、阿里云 OSS、腾讯云 COS(切换端点即可),本地开发自动回退到本地磁盘 + 静态文件服务
 - **链接输出**:每次生成返回 `{ url, filename, size, mimeType, ... }`,Agent 直接拿到可下载链接
 - **Dify 插件包**:`dify-plugin/` 提供可直接打包导入 Dify 的工具插件
+- **独立 Web 管理后台**:HTTP 模式下自动在**单独端口**(默认 9001)启动管理界面,提供生成文件管理(列表/预览/下载/删除)、文档模板定制与一键生成,与功能端口(9000)完全分离,互不干扰
 
 ## 架构
 
@@ -45,6 +46,9 @@ src/
 │   ├── word.ts pdf.ts excel.ts ppt.ts
 ├── mcp/server.ts       # MCP 工具/资源注册(registerTool)
 ├── http/server.ts      # MCP Streamable HTTP + REST + 静态文件
+├── admin/server.ts     # Web 管理后台(独立端口 R EST:文件/模板/生成)
+│   ├── templates.ts    # 模板持久化(JSON 文件)
+│   └── public/         # 管理界面前端(HTML/CSS/JS,零依赖)
 └── storage/            # Storage 抽象:s3.ts / local.ts
 dify-plugin/            # Dify 插件包(Python dify-plugin SDK)
 scripts/                # 冒烟测试脚本
@@ -69,6 +73,27 @@ npm run start:http          # 或 npm run dev:http
 - REST 端点:`POST http://localhost:9000/api/documents/:format`
 - 健康检查:`GET /health`
 - 本地生成的文件通过 `/files/...` 访问
+- Web 管理后台:`http://localhost:9001/`(独立端口,默认 9001,可用 `ADMIN_PORT` 修改)
+
+## Web 管理后台
+
+HTTP 模式下自动启动一个独立的 Web 管理界面(端口与功能端口分离,默认 `ADMIN_PORT=9001`),用于:
+
+- **生成文件管理**:查看全部已生成文件(文件名/格式/大小/时间)、搜索、上传源预览(PDF 在线预览,Office 格式展示元数据)、下载、删除
+- **模板定制**:以 JSON 形式创建/编辑/保存文档内容模板(四种格式各带示例,可一键载入),模板持久化为 `templates/*.json`
+- **文档生成**:从模板或直接编辑 JSON 输入生成 docx/pdf/xlsx/pptx,生成结果复用同一套存储,随即出现在「生成文件」列表中
+
+> 初始启动会向 `templates/` 写入 4 个示例模板便于上手;删除 `templates/` 目录后会自动重新写入。
+
+## 样式模板(默认 PPT / Word / Excel 外观)
+
+样式模板是用户上传的**真实文档文件**(.pptx / .docx / .xlsx),生成同格式文档时自动继承它的**主题 / 母版 / 布局 / 配色**(PPT 的母版与版式、Word 的主题/样式、Excel 的表格样式)。
+
+- 生成时不传 `styleTemplateId`,自动套用该格式在管理后台设置的**默认样式模板**;传了 `styleTemplateId` 则使用指定模板。
+- **内置默认 PPT 模板**:首次启动会自动把 `src/assets/default-presentation.pptx` 注册为 pptx 的默认样式模板(浅色背景 + 深蓝页眉条 + 橙色点缀 + 16:9 版式),因此生成 PPT 默认就带样式、不再是白底。
+- 更换默认外观:在管理后台「样式模板」上传自己的模板并「设为默认」即可。
+- 内置默认只在**首次启动**、且该格式**尚无默认**时写入(`style-templates/.seed-defaults` 标记控制;删除该标记并重启可重新导入内置模板),不会覆盖你后来设置的默认。
+- 注意:样式全部继承自模板的**母版 / 布局 / 主题**。若模板本身就是"白底、母版为空"的文件,生成结果仍会是白底——请使用带母版背景/版式的正式模板。
 
 ## 配置
 
@@ -78,6 +103,10 @@ npm run start:http          # 或 npm run dev:http
 | `VERBOSE` | `false` | 是否输出详细日志 |
 | `HOST` / `PORT` | `0.0.0.0` / `9000` | HTTP 监听地址 |
 | `MCP_PATH` | `/mcp` | MCP 端点路径 |
+| `ADMIN_ENABLED` | `true` | 是否启动管理后台(仅 HTTP 模式有效) |
+| `ADMIN_HOST` / `ADMIN_PORT` | `0.0.0.0` / `9001` | 管理后台监听地址(独立于 `PORT`) |
+| `TEMPLATE_DIR` | `templates` | 模板 JSON 持久化目录 |
+| `STYLE_TEMPLATE_DIR` | `style-templates` | 样式模板(上传的 pptx/docx/xlsx 文件)存储目录 |
 | `STORAGE_MODE` | `local` | `local` 或 `s3` |
 | `LOCAL_STORAGE_DIR` | `storage` | 本地存储目录 |
 | `LOCAL_PUBLIC_BASE_URL` | `http://localhost:9000` | 生成链接的对外访问地址(部署到公网时改成本机公网域名) |

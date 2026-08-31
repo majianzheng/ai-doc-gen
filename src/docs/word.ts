@@ -3,6 +3,7 @@ import {
   Document,
   Footer,
   HeadingLevel,
+  ImageRun,
   LevelFormat,
   Packer,
   Paragraph,
@@ -13,8 +14,10 @@ import {
   WidthType,
   type IParagraphOptions,
 } from 'docx';
-import type { DocxInput, ParagraphItem, TableData } from './types.js';
-import type { Generator } from './generator.js';
+import JSZip from 'jszip';
+import type { DocxInput, ImageItem, ParagraphItem, TableData } from './types.js';
+import type { Generator, GenerateContext } from './generator.js';
+import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
 
 function docxLevel(level: number | undefined): string | undefined {
   if (!level || level < 1) return undefined;
@@ -58,6 +61,54 @@ function paragraphToDocx(p: ParagraphItem): Paragraph {
   return new Paragraph(options);
 }
 
+async function imageToDocxParagraphs(img: ImageItem): Promise<Paragraph[]> {
+  const resolved = await resolveImage(img);
+  const intrinsic = intrinsicSize(resolved.buffer, resolved.format);
+  const size = computeSize({ width: resolved.width, height: resolved.height }, intrinsic, 400);
+
+  const isSvg = resolved.kind === 'svg';
+  const typeContent: 'png' | 'jpg' | 'gif' | 'bmp' | 'svg' = isSvg
+    ? 'svg'
+    : ({ png: 'png', jpeg: 'jpg', jpg: 'jpg', gif: 'gif', bmp: 'bmp' } as Record<string, 'png' | 'jpg' | 'gif' | 'bmp'>)[resolved.format] ?? 'png';
+  const transformation = { width: Math.round(size.width), height: Math.round(size.height) };
+
+  // Word requires the SVG to come with a raster fallback, so we rasterize it.
+  let run: ImageRun;
+  if (isSvg) {
+    const { png } = await svgToPng(resolved.buffer);
+    run = new ImageRun({
+      type: 'svg',
+      data: resolved.buffer.toString('base64'),
+      transformation,
+      fallback: { type: 'png', data: png.toString('base64'), transformation },
+    } as never);
+  } else {
+    run = new ImageRun({
+      type: typeContent,
+      data: resolved.buffer.toString('base64'),
+      transformation,
+    } as never);
+  }
+
+  const alignMap: Record<string, (typeof AlignmentType)[keyof typeof AlignmentType] | undefined> = {
+    left: undefined,
+    center: AlignmentType.CENTER,
+    right: AlignmentType.RIGHT,
+  };
+  const paragraphs: Paragraph[] = [
+    new Paragraph({ alignment: alignMap[resolved.align ?? 'left'], children: [run] }),
+  ];
+  if (resolved.caption) {
+    paragraphs.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 40 },
+      children: [new TextRun({ text: resolved.caption, size: 18, italics: true, color: '666666' })],
+    }));
+  }
+  paragraphs.push(new Paragraph({ children: [] }));
+  return paragraphs;
+}
+
 function tableToDocx(t: TableData): Table {
   const cols = t.columns ?? Object.keys(t.rows[0] ?? {}).map((k) => ({ key: k, header: k }));
   const headerRow = new TableRow({
@@ -77,43 +128,75 @@ function tableToDocx(t: TableData): Table {
   });
 }
 
+async function buildDocument(input: DocxInput): Promise<Document> {
+  const children: (Paragraph | Table)[] = [];
+
+  if (input.title) {
+    children.push(new Paragraph({
+      heading: HeadingLevel.TITLE,
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: input.title, bold: true })],
+    }));
+  }
+
+  for (const p of input.paragraphs ?? []) children.push(paragraphToDocx(p));
+
+  for (const t of input.tables ?? []) {
+    children.push(new Paragraph({ children: [] }));
+    children.push(tableToDocx(t));
+  }
+
+  for (const img of input.images ?? []) {
+    children.push(...(await imageToDocxParagraphs(img)));
+  }
+
+  return new Document({
+    creator: input.author,
+    title: input.title,
+    numbering: {
+      config: [{ reference: 'bullets', levels: [{ level: 0, format: LevelFormat.BULLET, text: '\u2022', alignment: AlignmentType.LEFT }] }],
+    },
+    sections: [{
+      properties: {},
+      children,
+      footers: input.footer ? {
+        default: new Footer({ children: [new Paragraph({ children: [new TextRun({ text: input.footer, size: 18 })] })] }),
+      } : undefined,
+    }],
+  });
+}
+
+/**
+ * Apply a style template: copy the template's styles, theme and font table into
+ * the freshly generated document so the output inherits the template's visual
+ * design (fonts / colors / heading styles) instead of the default look.
+ */
+async function applyStyleTemplate(generated: Buffer, template: Buffer): Promise<Buffer> {
+  const gen = await JSZip.loadAsync(generated);
+  const tpl = await JSZip.loadAsync(template);
+  const parts = ['word/styles.xml', 'word/theme/theme1.xml', 'word/fontTable.xml'];
+  for (const part of parts) {
+    const file = tpl.file(part);
+    if (file) {
+      gen.file(part, await file.async('string'));
+    }
+  }
+  return Buffer.from(await gen.generateAsync({ type: 'nodebuffer' }));
+}
+
 export const docxGenerator: Generator = {
   format: 'docx',
   mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   extension: 'docx',
-  async generate(input: DocxInput): Promise<Buffer> {
-    const children: (Paragraph | Table)[] = [];
-
-    if (input.title) {
-      children.push(new Paragraph({
-        heading: HeadingLevel.TITLE,
-        alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: input.title, bold: true })],
-      }));
+  async generate(input: DocxInput, ctx?: GenerateContext): Promise<Buffer> {
+    const buffer = await Packer.toBuffer(await buildDocument(input));
+    if (ctx?.styleTemplate) {
+      try {
+        return await applyStyleTemplate(buffer, ctx.styleTemplate);
+      } catch (err) {
+        console.warn('[ai-doc] failed to apply docx style template, falling back to default styling:', (err as Error).message);
+      }
     }
-
-    for (const p of input.paragraphs ?? []) children.push(paragraphToDocx(p));
-
-    for (const t of input.tables ?? []) {
-      children.push(new Paragraph({ children: [] }));
-      children.push(tableToDocx(t));
-    }
-
-    const doc = new Document({
-      creator: input.author,
-      title: input.title,
-      numbering: {
-        config: [{ reference: 'bullets', levels: [{ level: 0, format: LevelFormat.BULLET, text: '\u2022', alignment: AlignmentType.LEFT }] }],
-      },
-      sections: [{
-        properties: {},
-        children,
-        footers: input.footer ? {
-          default: new Footer({ children: [new Paragraph({ children: [new TextRun({ text: input.footer, size: 18 })] })] }),
-        } : undefined,
-      }],
-    });
-
-    return Packer.toBuffer(doc);
+    return buffer;
   },
 };
