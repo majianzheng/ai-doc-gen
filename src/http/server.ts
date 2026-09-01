@@ -99,13 +99,14 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
     }
     const styleTemplateId = (req.body as { styleTemplateId?: string } | undefined)?.styleTemplateId;
     const filename = (req.body as { filename?: string } | undefined)?.filename;
+    const username = (req.body as { username?: string } | undefined)?.username;
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       res.status(422).json({ error: 'Validation failed', details: parsed.error.flatten() });
       return;
     }
     try {
-      const doc = await service.generate(format, parsed.data as never, { styleTemplateId, filename });
+      const doc = await service.generate(format, parsed.data as never, { styleTemplateId, filename, owner: username });
       res.status(201).json(doc);
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });

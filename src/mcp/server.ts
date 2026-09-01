@@ -49,18 +49,33 @@ const COMMON_RETURN = [
   'Give the user the final "url" (public download link) directly.',
 ].join('\n');
 
+// Strong, early instruction so the model reliably passes a human-readable file
+// name instead of relying on the (title/random) server-side fallback.
+const FILENAME_RULE = [
+  '',
+  'IMPORTANT — always set "filename":',
+  '- It must be the generated file\'s human-readable download name, WITHOUT file extension, e.g. "Q3经营报告", "发票明细", "2025年度总结".',
+  '- Derive it from the document subject/title and keep it concise (<=60 chars). Use letters/digits/CJK, spaces, "-" or "_".',
+  '- Never omit it and never set a generic value like "文档", "untitled", or "report".',
+  '- Examples: subject "2025年第三季度经营分析" → "filename": "2025年Q3经营分析"; subject "员工培训合同" → "filename": "员工培训合同".',
+  'Only if the user gave no subject at all may you fall back to the title; the system then derives it automatically.',
+].join('\n');
+
 const STYLE_TEMPLATE_DOC = [
   'styleTemplateId (string, optional): uuid of an uploaded file-based style template of the SAME format to inherit its',
-  'theme/colors/fonts/layout (e.g. "inherit the company deck design"). When omitted, the admin-configured per-format',
-  'default template is applied automatically (if any).',
-  'filename (string, optional): desired download file name WITHOUT the extension (e.g. "Q3经营报告"); a safe basename',
-  'is used and the correct extension (.pptx/.docx/.xlsx/.pdf) is added automatically (defaults to a random hex id).',
+  'theme/colors/fonts/layout (e.g. "inherit the company deck design"). When omitted, the caller\'s own per-format default',
+  'template is used if set; otherwise the platform/system default template is applied (if any).',
+  'username (string, optional): the SSO username of the user who is generating this document. It scopes the generated',
+  'file (only that user can see it in the admin UI) and becomes the document author when `author` is not provided.',
+  'The platform (Dify / MCP gateway) usually sets this automatically.',
+  'filename (string): REQUIRED — see the "IMPORTANT — always set filename" rule above. A safe basename is applied and the',
+  'correct extension (.pptx/.docx/.xlsx/.pdf) is added automatically.',
 ].join('\n');
 
 const PDF_STYLE_TEMPLATE_DOC = [
   'styleTemplateId (string, optional): accepted for interface compatibility; style templates only affect PPTX / DOCX / XLSX files.',
-  'filename (string, optional): desired download file name WITHOUT the extension (e.g. "发票明细"); a safe basename',
-  'is used and the correct extension (.pdf) is added automatically (defaults to a random hex id).',
+  'filename (string): REQUIRED — see the "IMPORTANT — always set filename" rule above. A safe basename is applied and the',
+  'correct extension (.pdf) is added automatically.',
 ].join('\n');
 
 export function createMcpServer(service: DocumentService): McpServer {
@@ -75,6 +90,7 @@ export function createMcpServer(service: DocumentService): McpServer {
       title: 'Generate Word (.docx)',
       description: [
         'Create a Microsoft Word (.docx) document from structured content and return a public download link. Use this for Word reports, 文档/汇报/合同/简历. ',
+        FILENAME_RULE,
         '',
         'Input fields:',
         '- title (string, optional): document title, rendered as a centered large heading.',
@@ -85,14 +101,14 @@ export function createMcpServer(service: DocumentService): McpServer {
                 `- ${STYLE_TEMPLATE_DOC}`,
         '',
         'Example:',
-        '{"title":"Q3 经营报告","paragraphs":[{"text":"摘要","level":1},{"text":"本季度收入增长18%","bullet":true},{"text":"成本下降5%","bullet":true}],"tables":[{"columns":[{"key":"m","header":"月份"},{"key":"rev","header":"收入(万元)"}],"rows":[{"m":"7月","rev":120},{"m":"8月","rev":141}]}],"images":[{"data":"data:image/png;base64,....","width":420,"align":"center","caption":"营收变化曲线"}]}',
+        '{"filename":"Q3经营报告","title":"Q3 经营报告","paragraphs":[{"text":"摘要","level":1},{"text":"本季度收入增长18%","bullet":true},{"text":"成本下降5%","bullet":true}],"tables":[{"columns":[{"key":"m","header":"月份"},{"key":"rev","header":"收入(万元)"}],"rows":[{"m":"7月","rev":120},{"m":"8月","rev":141}]}],"images":[{"data":"data:image/png;base64,....","width":420,"align":"center","caption":"营收变化曲线"}]}',
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: docxSchema,
     },
     async (args: Record<string, unknown>) => {
-      const { styleTemplateId, filename, ...rest } = args;
-      return toMcpResult(await service.generate('docx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined }));
+      const { styleTemplateId, filename, username, ...rest } = args;
+      return toMcpResult(await service.generate('docx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 
@@ -102,6 +118,7 @@ export function createMcpServer(service: DocumentService): McpServer {
       title: 'Generate PDF',
       description: [
         'Create a PDF document from structured content and return a public download link. Use this for printable/高保真 documents (PDF export of reports, invoices, newsletters).',
+        FILENAME_RULE,
         '',
         'Input fields:',
         '- title (string, optional): document title, rendered as a centered heading.',
@@ -113,14 +130,14 @@ export function createMcpServer(service: DocumentService): McpServer {
         `- ${PDF_STYLE_TEMPLATE_DOC}`,
         '',
         'Example:',
-        '{"title":"发票明细","paragraphs":[{"text":"订单号 #1042","level":2},{"text":"共3件商品","bullet":true}],"tables":[{"columns":[{"key":"item","header":"商品"},{"key":"price","header":"单价"}],"rows":[{"item":"键盘","price":199},{"item":"鼠标","price":89}]}],"footer":"ai-doc 生成","images":[{"svg":"<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"300\\" height=\\"100\\"><rect width=\\"300\\" height=\\"100\\" fill=\\"#2F5496\\"/></svg>","align":"center"}]}',
+        '{"filename":"发票明细","title":"发票明细","paragraphs":[{"text":"订单号 #1042","level":2},{"text":"共3件商品","bullet":true}],"tables":[{"columns":[{"key":"item","header":"商品"},{"key":"price","header":"单价"}],"rows":[{"item":"键盘","price":199},{"item":"鼠标","price":89}]}],"footer":"ai-doc 生成","images":[{"svg":"<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"300\\" height=\\"100\\"><rect width=\\"300\\" height=\\"100\\" fill=\\"#2F5496\\"/></svg>","align":"center"}]}',
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: pdfSchema,
     },
     async (args: Record<string, unknown>) => {
-      const { styleTemplateId, filename, ...rest } = args;
-      return toMcpResult(await service.generate('pdf', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined }));
+      const { styleTemplateId, filename, username, ...rest } = args;
+      return toMcpResult(await service.generate('pdf', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 
@@ -130,6 +147,7 @@ export function createMcpServer(service: DocumentService): McpServer {
       title: 'Generate Excel (.xlsx)',
       description: [
         'Create an Excel (.xlsx) workbook with one or more worksheets of tabular data and return a public download link. Use this for spreadsheets, 数据表格/报表/清单.',
+        FILENAME_RULE,
         '',
         'Input fields:',
         '- title (string, optional): workbook metadata.',
@@ -143,14 +161,14 @@ export function createMcpServer(service: DocumentService): McpServer {
         `- ${STYLE_TEMPLATE_DOC}`,
         '',
         'Example:',
-        '{"sheets":[{"name":"销售额","columns":[{"key":"region","header":"区域"},{"key":"sales","header":"销售额"}],"rows":[{"region":"华东","sales":1280.5},{"region":"华南","sales":960.2}],"images":[{"data":"data:image/png;base64,....","width":240}]}]}',
+        '{"filename":"2025年销售台账","sheets":[{"name":"销售额","columns":[{"key":"region","header":"区域"},{"key":"sales","header":"销售额"}],"rows":[{"region":"华东","sales":1280.5},{"region":"华南","sales":960.2}],"images":[{"data":"data:image/png;base64,....","width":240}]}]}',
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: xlsxSchema,
     },
     async (args: Record<string, unknown>) => {
-      const { styleTemplateId, filename, ...rest } = args;
-      return toMcpResult(await service.generate('xlsx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined }));
+      const { styleTemplateId, filename, username, ...rest } = args;
+      return toMcpResult(await service.generate('xlsx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 
@@ -160,6 +178,7 @@ export function createMcpServer(service: DocumentService): McpServer {
       title: 'Generate PowerPoint (.pptx)',
       description: [
         'Create a PowerPoint (.pptx) deck from structured content and return a public download link. A title slide is generated from the top-level title; each slide in `slides` becomes a content slide.',
+        FILENAME_RULE,
         '',
         'Input fields:',
         '- title (string, required): presentation title (also the title slide).',
@@ -176,14 +195,14 @@ export function createMcpServer(service: DocumentService): McpServer {
         `- ${STYLE_TEMPLATE_DOC}`,
         '',
         'Example:',
-        '{"title":"渠道汇报","slides":[{"title":"各渠道表现","bullets":["线上销售增长25%","线下持平"],"tables":[{"columns":[{"key":"ch","header":"渠道"},{"key":"growth","header":"增长"}],"rows":[{"ch":"线上","growth":"25%"},{"ch":"线下","growth":"0%"}]}]},{"title":"数据可视化","images":[{"svg":"<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"400\\" height=\\"200\\"><circle cx=\\"100\\" cy=\\"100\\" r=\\"80\\" fill=\\"#E8A33D\\"/></svg>","align":"center"}]}]}',
+        '{"filename":"渠道汇报","title":"渠道汇报","slides":[{"title":"各渠道表现","bullets":["线上销售增长25%","线下持平"],"tables":[{"columns":[{"key":"ch","header":"渠道"},{"key":"growth","header":"增长"}],"rows":[{"ch":"线上","growth":"25%"},{"ch":"线下","growth":"0%"}]}]},{"title":"数据可视化","images":[{"svg":"<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"400\\" height=\\"200\\"><circle cx=\\"100\\" cy=\\"100\\" r=\\"80\\" fill=\\"#E8A33D\\"/></svg>","align":"center"}]}]}',
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: pptxSchema,
     },
     async (args: Record<string, unknown>) => {
-      const { styleTemplateId, filename, ...rest } = args;
-      return toMcpResult(await service.generate('pptx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined }));
+      const { styleTemplateId, filename, username, ...rest } = args;
+      return toMcpResult(await service.generate('pptx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 

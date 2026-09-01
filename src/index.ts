@@ -8,6 +8,9 @@ import { createHttpApp } from './http/server.js';
 import { createAdminApp } from './admin/server.js';
 import { TemplateStore } from './admin/templates.js';
 import { StyleTemplateStore, type StyleTemplateSeed } from './admin/styleTemplates.js';
+import { UserStore } from './admin/users.js';
+import { SessionManager, loadSessionSecret } from './admin/session.js';
+import { SsoConfigStore } from './admin/sso/index.js';
 
 /** Register bundled files as per-format default style templates (pptx by
  *  default). Only runs on the first startup per style-template directory, and
@@ -61,7 +64,20 @@ async function main(): Promise<void> {
   });
 
   if (config.admin.enabled) {
-    const adminApp = createAdminApp({ config, service, storage, templates, styleTemplates });
+    const users = new UserStore(config.data.dir);
+    await users.init({
+      username: config.admin.username,
+      password: config.admin.password,
+      ssoAdmins: config.admin.ssoAdmins,
+    });
+    if (process.env.ADMIN_PASSWORD === undefined || process.env.ADMIN_PASSWORD === '') {
+      // eslint-disable-next-line no-console
+      console.warn(`[ai-doc] built-in super admin '${config.admin.username}' is using the DEFAULT password '${config.admin.password}'. Set ADMIN_USERNAME/ADMIN_PASSWORD in .env for production.`);
+    }
+    const sessionSecret = await loadSessionSecret(config.data.dir, process.env.ADMIN_SESSION_SECRET);
+    const accounts = new SessionManager(sessionSecret);
+    const ssoConfig = new SsoConfigStore(config.data.dir);
+    const adminApp = createAdminApp({ config, service, storage, templates, styleTemplates, users, sessions: accounts, ssoConfigStore: ssoConfig });
     adminApp.listen(config.admin.port, config.admin.host, () => {
       // eslint-disable-next-line no-console
       console.log(`[ai-doc] Admin UI: http://localhost:${config.admin.port}/  (port ${config.admin.port}, separated from the service port ${config.http.port})`);

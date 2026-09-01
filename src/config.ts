@@ -24,6 +24,17 @@ export interface AdminConfig {
   enabled: boolean;
   host: string;
   port: number;
+  /** username of the built-in super admin (seed from ADMIN_USERNAME) */
+  username: string;
+  /** initial password of the built-in super admin (ADMIN_PASSWORD); changeable in the UI afterwards */
+  password: string;
+  /** extra usernames (from SSO) that are promoted to admin role (ADMIN_SSO_ADMINS, comma separated) */
+  ssoAdmins: string[];
+}
+
+export interface DataConfig {
+  /** directory for local state: users.json, sso-config.json, session secret (DATA_DIR) */
+  dir: string;
 }
 
 export type StorageMode = 's3' | 'local';
@@ -34,6 +45,7 @@ export interface Config {
   local: LocalConfig;
   http: HttpConfig;
   admin: AdminConfig;
+  data: DataConfig;
   /** directory where the admin web UI persists document templates */
   templateDir: string;
   /** directory where uploaded file-based style templates (pptx/docx/xlsx) are stored */
@@ -82,6 +94,12 @@ export function loadConfig(): Config {
     enabled: boolEnv('ADMIN_ENABLED', true),
     host: process.env.ADMIN_HOST ?? '0.0.0.0',
     port: Number(process.env.ADMIN_PORT ?? 9800),
+    username: process.env.ADMIN_USERNAME ?? 'admin',
+    password: process.env.ADMIN_PASSWORD ?? 'admin',
+    ssoAdmins: (process.env.ADMIN_SSO_ADMINS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 
   return {
@@ -90,6 +108,9 @@ export function loadConfig(): Config {
     local,
     http,
     admin,
+    data: {
+      dir: process.env.DATA_DIR ?? 'admin-data',
+    },
     templateDir: process.env.TEMPLATE_DIR ?? 'templates',
     styleTemplateDir: process.env.STYLE_TEMPLATE_DIR ?? 'style-templates',
     transport,

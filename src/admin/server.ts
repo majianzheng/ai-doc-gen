@@ -3,15 +3,21 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { DocumentService } from '../core.js';
+import { ownerSlug } from '../core.js';
 import type { Config } from '../config.js';
-import type { Storage } from '../storage/storage.js';
+import type { Storage, StorageObjectInfo } from '../storage/storage.js';
 import { MIME_TYPES, type DocFormat } from '../docs/types.js';
 import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, listGenerators } from '../docs/index.js';
 import { TemplateStore, type TemplateInput } from './templates.js';
-import { StyleTemplateStore } from './styleTemplates.js';
+import { StyleTemplateStore, SYSTEM_OWNER } from './styleTemplates.js';
+import { UserStore } from './users.js';
+import { SessionManager } from './session.js';
+import { SsoConfigStore } from './sso/index.js';
+import { createAuth, type AuthContext } from './auth.js';
 
 const FORMAT_SCHEMAS = { docx: docxSchema, pdf: pdfSchema, xlsx: xlsxSchema, pptx: pptxSchema } as const;
 const SUPPORTED_FORMATS: DocFormat[] = ['docx', 'pdf', 'xlsx', 'pptx'];
+const STYLE_FORMATS: ('pptx' | 'docx' | 'xlsx')[] = ['pptx', 'docx', 'xlsx'];
 
 function b64url(s: string): string {
   return Buffer.from(s, 'utf8').toString('base64url');
@@ -37,6 +43,23 @@ function styleFormatFromFilename(filename: string): DocFormat | null {
   return null;
 }
 
+/** Infer the owner username from a storage key: the path segment just before
+ *  the YYYY date directory. Legacy keys (no owner segment) are 'system'. */
+function inferOwner(key: string, users: UserStore): string {
+  const parts = key.split('/').filter(Boolean);
+  const dateIdx = parts.findIndex((p) => /^\d{4}$/.test(p));
+  const ownerIdx = dateIdx > 0 ? dateIdx - 1 : -1;
+  // key can be [basePath]/[owner]/YYYY/MM/DD/file or [owner]/YYYY/... or YYYY/...
+  const candidate = ownerIdx >= 0 ? parts[ownerIdx] : undefined;
+  if (candidate === undefined) return 'system';
+  const known = users.list().find((u) => ownerSlug(u.username) === candidate);
+  return known ? known.username : 'system';
+}
+
+function fileBelongsToUser(key: string, username: string): boolean {
+  return key.split('/').filter(Boolean).includes(ownerSlug(username));
+}
+
 function resolvePublicDir(): string {
   const candidates = [
     fileURLToPath(new URL('./public', import.meta.url)),
@@ -52,23 +75,41 @@ function resolveError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+export interface AdminAppOptions {
+  config: Config;
+  service: DocumentService;
+  storage: Storage;
+  templates: TemplateStore;
+  styleTemplates: StyleTemplateStore;
+  users: UserStore;
+  sessions: SessionManager;
+  ssoConfigStore: SsoConfigStore;
+}
+
 /**
- * Admin web UI server. Runs on its own port (default 9001) so it never
- * interferes with the MCP / REST / static-file port (default 9000). Offers:
- *  - file management (list / download / inline preview / delete)
- *  - document template customization (persisted as JSON files)
- *  - document generation from a template or arbitrary input
+ * Admin web UI server. Runs on its own port (default 9800) so it never
+ * interferes with the MCP / REST / static-file port (default 9000). Requires
+ * login: the built-in super admin (ADMIN_USERNAME/ADMIN_PASSWORD) or, when
+ * enabled, an SSO account. Every generated file is scoped to its owner and
+ * normal users only ever see their own files (+ system style templates).
  */
-export function createAdminApp(options: { config: Config; service: DocumentService; storage: Storage; templates: TemplateStore; styleTemplates: StyleTemplateStore }): express.Express {
-  const { config, service, storage, templates, styleTemplates } = options;
+export function createAdminApp(options: AdminAppOptions): express.Express {
+  const { config, service, storage, templates, styleTemplates, users, sessions, ssoConfigStore } = options;
   const app = express();
+  app.set('trust proxy', true);
   app.use(express.json({ limit: '25mb' }));
+
+  const auth: AuthContext = createAuth({ config, users, sessions, ssoConfigStore });
+  app.use(auth.sessionMiddleware);
+  app.use(auth.router);
+
+  const isAdmin = (req: express.Request) => req.user?.role === 'admin';
 
   const publicDir = resolvePublicDir();
   app.use(express.static(publicDir));
   app.get('/', (_req, res) => res.sendFile(join(publicDir, 'index.html')));
 
-  // ---- meta ----
+  // ---- meta (public) ----
   app.get('/api/meta', (_req, res) => {
     res.json({
       storageMode: config.storageMode,
@@ -78,30 +119,42 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     });
   });
 
-  // ---- generated files ----
-  app.get('/api/files', async (_req, res) => {
+  // ---- generated files (scoped to the authenticated user) ----
+  app.get('/api/files', auth.requireAuth, async (req, res) => {
     try {
+      if (!req.user) return;
       const items = await storage.list();
-      res.json(items.map((o) => ({
-        key: o.key,
-        name: o.key.split('/').pop(),
-        format: formatFromKey(o.key),
-        size: o.size,
-        lastModified: o.lastModified ? o.lastModified.toISOString() : null,
-        url: storage.url(o.key),
-        previewUrl: `/api/files/content?key=${b64url(o.key)}&disposition=inline`,
-        downloadUrl: `/api/files/content?key=${b64url(o.key)}&disposition=attachment`,
-      })));
+      const admin = isAdmin(req);
+      const visible = admin ? items : items.filter((o) => fileBelongsToUser(o.key, req.user!.username));
+      res.json(visible.map((o) => toFileDto(o)));
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }
   });
 
-  app.get('/api/files/content', async (req, res) => {
+  function toFileDto(o: StorageObjectInfo & { listedAt?: never }) {
+    return {
+      key: o.key,
+      name: o.key.split('/').pop(),
+      format: formatFromKey(o.key),
+      size: o.size,
+      lastModified: o.lastModified ? o.lastModified.toISOString() : null,
+      url: storage.url(o.key),
+      owner: inferOwner(o.key, users),
+      previewUrl: `/api/files/content?key=${b64url(o.key)}&disposition=inline`,
+      downloadUrl: `/api/files/content?key=${b64url(o.key)}&disposition=attachment`,
+    };
+  }
+
+  app.get('/api/files/content', auth.requireAuth, async (req, res) => {
     const key = req.query.key ? fromB64url(String(req.query.key)) : '';
     const disposition = req.query.disposition === 'attachment' ? 'attachment' : 'inline';
     if (!key) {
       res.status(400).json({ error: 'missing key' });
+      return;
+    }
+    if (!req.user || (!isAdmin(req) && !fileBelongsToUser(key, req.user.username))) {
+      res.status(403).json({ error: 'forbidden' });
       return;
     }
     try {
@@ -121,8 +174,12 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     }
   });
 
-  app.delete('/api/files/:b64key', async (req, res) => {
+  app.delete('/api/files/:b64key', auth.requireAuth, async (req, res) => {
     const key = fromB64url(req.params.b64key);
+    if (!req.user || (!isAdmin(req) && !fileBelongsToUser(key, req.user.username))) {
+      res.status(403).json({ error: 'forbidden' });
+      return;
+    }
     try {
       await storage.delete(key);
       res.json({ ok: true, key });
@@ -131,8 +188,8 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     }
   });
 
-  // ---- templates ----
-  app.get('/api/templates', async (_req, res) => {
+  // ---- content templates (read for any user; write only admins) ----
+  app.get('/api/templates', auth.requireAuth, async (_req, res) => {
     try {
       res.json(await templates.list());
     } catch (err) {
@@ -140,7 +197,7 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     }
   });
 
-  app.get('/api/templates/:id', async (req, res) => {
+  app.get('/api/templates/:id', auth.requireAuth, async (req, res) => {
     const tpl = await templates.get(req.params.id);
     if (!tpl) {
       res.status(404).json({ error: 'template not found' });
@@ -173,7 +230,7 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     };
   };
 
-  app.post('/api/templates', async (req, res) => {
+  app.post('/api/templates', auth.requireAdmin, async (req, res) => {
     const check = validateTemplateInput(req.body);
     if (!check.ok) {
       res.status(422).json({ error: check.error });
@@ -187,7 +244,7 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     }
   });
 
-  app.put('/api/templates/:id', async (req, res) => {
+  app.put('/api/templates/:id', auth.requireAdmin, async (req, res) => {
     const existing = await templates.get(req.params.id);
     if (!existing) {
       res.status(404).json({ error: 'template not found' });
@@ -206,7 +263,7 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     }
   });
 
-  app.delete('/api/templates/:id', async (req, res) => {
+  app.delete('/api/templates/:id', auth.requireAdmin, async (req, res) => {
     const ok = await templates.remove(req.params.id);
     if (!ok) {
       res.status(404).json({ error: 'template not found' });
@@ -215,48 +272,74 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
     res.json({ ok: true, id: req.params.id });
   });
 
-  // ---- style templates (uploaded document files used as visual templates) ----
-  app.get('/api/style-templates', async (_req, res) => {
+  // ---- style templates (per-user: system templates are read-only for users) ----
+  app.get('/api/style-templates', auth.requireAuth, async (req, res) => {
     try {
-      const defaults = await styleTemplates.getDefaults();
-      const list = await styleTemplates.list();
-      res.json(list.map((t) => ({ ...t, isDefault: defaults[t.format as 'pptx' | 'docx' | 'xlsx'] === t.id })));
+      if (!req.user) return;
+      const admin = isAdmin(req);
+      const viewScope = admin ? 'all' : req.user.username;
+      const list = await styleTemplates.list(viewScope);
+      const systemDefaults = (await styleTemplates.getDefaults()) as Record<string, string | undefined>;
+      const ownDefaults = admin ? {} : ((await styleTemplates.getDefaultsFor(req.user.username)) as Record<string, string | undefined>);
+      const active = await Promise.all(
+        STYLE_FORMATS.map(async (f) => ({ format: f, id: await styleTemplates.resolveDefault(f, admin ? SYSTEM_OWNER : req.user!.username) })),
+      );
+      const effectiveDefaults = Object.fromEntries(active.map((a) => [a.format, a.id]));
+      res.json({
+        items: list.map((t) => ({
+          ...t,
+          owner: t.owner,
+          system: t.owner === SYSTEM_OWNER,
+          manageable: admin ? true : styleTemplates.canManage(t, { username: req.user!.username, role: req.user!.role }),
+          isSystemDefault: systemDefaults[t.format as 'pptx' | 'docx' | 'xlsx'] === t.id,
+          isUserDefault: (ownDefaults as Record<string, string | undefined>)[t.format] === t.id,
+        })),
+        defaults: effectiveDefaults,
+        systemDefaults,
+        ownDefaults,
+      });
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }
   });
 
-  app.get('/api/style-templates/defaults', async (_req, res) => {
+  app.get('/api/style-templates/defaults', auth.requireAuth, async (req, res) => {
     try {
-      res.json(await styleTemplates.getDefaults());
+      if (!req.user) return;
+      const admin = isAdmin(req);
+      const scope = admin ? SYSTEM_OWNER : req.user.username;
+      res.json(await styleTemplates.resolvedDefaultsFor(scope));
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }
   });
 
-  app.put('/api/style-templates/defaults', async (req, res) => {
+  app.put('/api/style-templates/defaults', auth.requireAuth, async (req, res) => {
     try {
+      if (!req.user) return;
       const format = (req.body ?? {}).format as DocFormat | undefined;
       const id = typeof (req.body ?? {}).id === 'string' ? (req.body ?? {}).id : '';
-      if (format !== 'pptx' && format !== 'docx' && format !== 'xlsx') {
+      if (!STYLE_FORMATS.includes(format as 'pptx')) {
         res.status(422).json({ error: 'unsupported style template format. Supported: pptx, docx, xlsx' });
         return;
       }
-      res.json(await styleTemplates.setDefault(format, id));
+      const target = isAdmin(req) ? SYSTEM_OWNER : req.user!.username;
+      const updated = await styleTemplates.setDefaultFor(format as 'pptx' | 'docx' | 'xlsx', id, target);
+      res.json({ defaults: updated, effective: await styleTemplates.resolveDefault(format as 'pptx' | 'docx' | 'xlsx', target) });
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }
   });
 
-  app.post('/api/style-templates', async (req, res) => {
+  app.post('/api/style-templates', auth.requireAuth, async (req, res) => {
     try {
+      if (!req.user) return;
       const body = req.body ?? {};
       const name = typeof body.name === 'string' ? body.name : '';
       const filename = typeof body.filename === 'string' ? body.filename : '';
       const mimeType = typeof body.mimeType === 'string' ? body.mimeType : 'application/octet-stream';
       const data = typeof body.data === 'string' ? body.data : '';
-      // The format is derived from the file extension (single source of truth),
-      // so the user doesn't have to pick it manually.
+      const owner = isAdmin(req) && body.owner === SYSTEM_OWNER ? SYSTEM_OWNER : req.user!.username;
       const format = styleFormatFromFilename(filename);
       if (!format) {
         res.status(422).json({ error: `无法从文件名识别格式: '${filename}'. 仅支持 .pptx / .docx / .xlsx` });
@@ -276,24 +359,35 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
         res.status(422).json({ error: 'empty file' });
         return;
       }
-      const meta = await styleTemplates.create({ name, format, filename, mimeType, buffer });
+      const meta = await styleTemplates.create({ name, format, filename, mimeType, buffer, owner });
       res.status(201).json(meta);
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }
   });
 
-  app.delete('/api/style-templates/:id', async (req, res) => {
-    const ok = await styleTemplates.remove(req.params.id);
-    if (!ok) {
-      res.status(404).json({ error: 'style template not found' });
-      return;
+  app.delete('/api/style-templates/:id', auth.requireAuth, async (req, res) => {
+    try {
+      if (!req.user) return;
+      const meta = await styleTemplates.get(req.params.id);
+      if (!meta) {
+        res.status(404).json({ error: 'style template not found' });
+        return;
+      }
+      if (!styleTemplates.canManage(meta, { username: req.user.username, role: req.user.role })) {
+        res.status(403).json({ error: 'you can only delete your own templates (system templates are admin-managed)' });
+        return;
+      }
+      await styleTemplates.remove(meta.id);
+      res.json({ ok: true, id: meta.id });
+    } catch (err) {
+      res.status(500).json({ error: resolveError(err) });
     }
-    res.json({ ok: true, id: req.params.id });
   });
 
-  // ---- generation ----
-  app.post('/api/generate', async (req, res) => {
+  // ---- generation (results always owned by the logged-in user) ----
+  app.post('/api/generate', auth.requireAuth, async (req, res) => {
+    if (!req.user) return;
     const b = (req.body ?? {}) as { templateId?: string; styleTemplateId?: string; filename?: string; format?: DocFormat; input?: unknown };
     let format: DocFormat;
     let input: unknown;
@@ -322,7 +416,11 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
       return;
     }
     try {
-      const doc = await service.generate(format, parsed.data as never, { styleTemplateId, filename: b.filename });
+      const doc = await service.generate(format, parsed.data as never, {
+        styleTemplateId,
+        filename: b.filename,
+        owner: req.user.username,
+      });
       res.status(201).json(doc);
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
@@ -331,6 +429,12 @@ export function createAdminApp(options: { config: Config; service: DocumentServi
 
   // ---- health ----
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', storage: config.storageMode }));
+
+  // ---- SPA fallback (client-side routing: /login, /callback, etc.) ----
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(join(publicDir, 'index.html'));
+  });
 
   return app;
 }

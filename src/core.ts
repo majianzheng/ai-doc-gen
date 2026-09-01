@@ -9,20 +9,30 @@ import type { StyleTemplateStore } from './admin/styleTemplates.js';
  * - strips directory components (no path traversal),
  * - keeps only letters, digits, CJK and a small safe punctuation set,
  * - normalizes the extension to the target format (.pptx/.docx/...),
- * - falls back to a random hex id when the result would be empty/invalid.
+ * - falls back to the document title when no file name was requested,
+ * - falls back to a random hex id when nothing usable remains.
  */
-export function resolveOutputFilename(requested: string | undefined, extension: string): string {
-  const fallback = `${randomUUID().slice(0, 8)}.${extension}`;
-  if (typeof requested !== 'string' || requested.trim() === '') return fallback;
-  const base = requested.replace(/\\/g, '/').split('/').pop() ?? '';
-  const cleaned = base
-    .replace(/\.[^./\\]+$/, '') // drop any extension the caller passed
-    .replace(/[^\p{L}\p{N} _-]/gu, '') // letters, digits, CJK, space, dash, underscore
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 100);
-  if (cleaned === '') return fallback;
-  return `${cleaned}.${extension}`;
+export function resolveOutputFilename(requested: string | undefined, extension: string, fallbackTitle?: string): string {
+  const hexFallback = `${randomUUID().slice(0, 8)}.${extension}`;
+  for (const candidate of [requested, fallbackTitle]) {
+    if (typeof candidate !== 'string' || candidate.trim() === '') continue;
+    const base = candidate.replace(/\\/g, '/').split('/').pop() ?? '';
+    const cleaned = base
+      .replace(/\.[^./\\]+$/, '') // drop any extension the caller passed
+      .replace(/[^\p{L}\p{N} _-]/gu, '') // letters, digits, CJK, space, dash, underscore
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100);
+    if (cleaned === '') continue;
+    return `${cleaned}.${extension}`;
+  }
+  return hexFallback;
+}
+
+/** Deterministically map a username to a filesystem-safe storage path segment
+ *  used to scope generated files per user (see DocumentService.generate). */
+export function ownerSlug(username: string): string {
+  return username.replace(/[^A-Za-z0-9._-]/g, (c) => `_x${c.codePointAt(0)!.toString(16)}_`);
 }
 
 /**
@@ -40,9 +50,24 @@ export class DocumentService {
     private readonly styleTemplates?: StyleTemplateStore,
   ) {}
 
-  async generate<F extends DocFormat>(format: F, rawInput: DocInputs[F], opts: { styleTemplateId?: string; filename?: string } = {}): Promise<GeneratedDocument> {
+  async generate<F extends DocFormat>(
+    format: F,
+    rawInput: DocInputs[F],
+    opts: { styleTemplateId?: string; filename?: string; owner?: string } = {},
+  ): Promise<GeneratedDocument> {
     const generator = getGenerator(format);
 
+    // ---- author defaults to the calling user unless the AI specified one ----
+    const owner = opts.owner?.trim();
+    let input = rawInput;
+    if (owner && format !== 'xlsx') {
+      const authorField = (rawInput as { author?: string }).author;
+      if (!authorField || !authorField.trim()) {
+        input = { ...rawInput, author: owner } as DocInputs[F];
+      }
+    }
+
+    // ---- style template resolution (per-owner fallback chain) ----
     let styleTemplate: Buffer | undefined;
     if (opts.styleTemplateId) {
       if (!this.styleTemplates) throw new Error('style templates are not configured');
@@ -51,23 +76,27 @@ export class DocumentService {
       if (tpl.format !== format) {
         throw new Error(`style template format '${tpl.format}' does not match target format '${format}'`);
       }
+      // A caller identified by username may only use their own or system templates.
+      if (owner && tpl.owner !== 'system' && tpl.owner !== owner) {
+        throw new Error(`style template '${opts.styleTemplateId}' is not available to '${owner}'`);
+      }
       styleTemplate = tpl.buffer;
     } else if (this.styleTemplates) {
-      // No explicit template -> fall back to the per-format active default so
-      // the admin UI / clients always know which template is being used.
-      const defaults = await this.styleTemplates.getDefaults();
-      const defaultId = defaults[format as 'pptx' | 'docx' | 'xlsx'];
-      if (defaultId) {
-        const tpl = await this.styleTemplates.get(defaultId);
+      const resolved = await this.styleTemplates.resolveDefault(format, owner);
+      if (resolved) {
+        const tpl = await this.styleTemplates.get(resolved);
         if (tpl && tpl.format === format) styleTemplate = tpl.buffer;
       }
     }
 
-    const buffer = await generator.generate(rawInput, styleTemplate ? { styleTemplate } : undefined);
+    const buffer = await generator.generate(input, styleTemplate ? { styleTemplate } : undefined);
 
     const datePath = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-    const base = [this.options.basePath, datePath].filter(Boolean).join('/');
-    const fileName = resolveOutputFilename(opts.filename, generator.extension);
+    const base = [this.options.basePath, owner ? ownerSlug(owner) : undefined, datePath].filter((x): x is string => Boolean(x)).join('/');
+    const fallbackTitle = typeof (rawInput as { title?: unknown }).title === 'string'
+      ? ((rawInput as { title: string }).title)
+      : undefined;
+    const fileName = resolveOutputFilename(opts.filename, generator.extension, fallbackTitle);
     const key = `${base}/${fileName}`;
     const keyCleaned = key.split('/').filter(Boolean).join('/');
 
@@ -84,6 +113,7 @@ export class DocumentService {
       mimeType: generator.mimeType,
       storageKey: stored.key,
       createdAt: new Date().toISOString(),
+      owner,
     };
   }
 }

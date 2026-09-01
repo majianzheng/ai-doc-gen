@@ -1,7 +1,29 @@
 import PDFDocument from 'pdfkit';
+import { fileURLToPath } from 'node:url';
 import type { ImageItem, ParagraphItem, PdfInput } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
 import { computeSize, resolveImage, svgToPng } from './images.js';
+
+/**
+ * Bundled CJK-capable fonts (Source Han Sans SC). PDFKit's built-in Helvetica
+ * family only encodes the WinAnsi subset, so any CJK text rendered through it
+ * comes out garbled. These OpenType fonts are embedded (pdfkit subsets them per
+ * document) and are used for body/heading/table text. Latin italics still map to
+ * Helvetica-Oblique so all-Latin documents keep their italic styling.
+ */
+const ASSET_DIR = new URL('../assets/fonts/', import.meta.url);
+const FONT_REG = 'scsR'; // SourceHanSansSC-Regular
+const FONT_BOLD = 'scsB'; // SourceHanSansSC-Bold
+
+function registerFonts(doc: PDFKit.PDFDocument): void {
+  doc.registerFont(FONT_REG, fileURLToPath(new URL('SourceHanSansSC-Regular.otf', ASSET_DIR)));
+  doc.registerFont(FONT_BOLD, fileURLToPath(new URL('SourceHanSansSC-Bold.otf', ASSET_DIR)));
+}
+
+const CJK_RE = /[\u2e80-\u2fff\u3000-\u9fff\uf900-\ufaff\uac00-\ud7af]/;
+function hasCjk(text: string): boolean {
+  return CJK_RE.test(text);
+}
 
 function sizeFor(level: number | undefined): number {
   if (!level) return 11;
@@ -18,6 +40,16 @@ function fontStyle(p: ParagraphItem): { bold?: boolean; italics?: boolean; size:
     italics: p.italic,
     size: sizeFor(p.level),
   };
+}
+
+/** Choose a PDFKit font name for a text run.
+ *  - Bold -> CJK bold font (robust for mixed CJK/Latin)
+ *  - Italic without CJK -> Helvetica-Oblique (keeps italic styling)
+ *  - everything else -> CJK regular */
+function fontName(style: { bold?: boolean; italics?: boolean }, text: string): string {
+  if (style.bold) return FONT_BOLD;
+  if (style.italics && !hasCjk(text)) return 'Helvetica-Oblique';
+  return FONT_REG;
 }
 
 /**
@@ -65,7 +97,7 @@ function renderImages(doc: PDFKit.PDFDocument, images: ImageItem[]): Promise<voi
     doc.y += dh;
     if (resolved.caption) {
       doc.moveDown(0.2);
-      doc.font('Helvetica-Oblique').fontSize(9).fillColor('#666666')
+      doc.font(FONT_REG).fontSize(9).fillColor('#666666')
         .text(resolved.caption, { align: 'center' });
     }
     doc.moveDown(0.6);
@@ -84,6 +116,7 @@ export const pdfGenerator: Generator = {
       if (input.author) info.Author = input.author;
       if (input.subject) info.Subject = input.subject;
       const doc = new PDFDocument({ size: 'A4', margin: 50, info });
+      registerFonts(doc);
       const chunks: Buffer[] = [];
       doc.on('data', (c: Buffer) => chunks.push(c));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -92,20 +125,19 @@ export const pdfGenerator: Generator = {
       doc.on('pageAdded', () => {
         if (!input.footer) return;
         doc.save();
-        doc.fontSize(8).fillColor('#888888');
+        doc.font(FONT_REG).fontSize(8).fillColor('#888888');
         doc.text(input.footer, 50, doc.page.height - 40, { align: 'center', width: doc.page.width - 100 });
         doc.restore();
       });
 
       if (input.title) {
-        doc.fontSize(24).font('Helvetica-Bold').fillColor('#131313').text(input.title, { align: 'center' });
+        doc.fontSize(24).font(FONT_BOLD).fillColor('#131313').text(input.title, { align: 'center' });
         doc.moveDown();
       }
 
       for (const p of input.paragraphs ?? []) {
         const style = fontStyle(p);
-        const font = style.bold ? 'Helvetica-Bold' : style.italics ? 'Helvetica-Oblique' : 'Helvetica';
-        doc.font(font).fontSize(style.size).fillColor(p.color ?? '#131313');
+        doc.font(fontName(style, p.text)).fontSize(style.size).fillColor(p.color ?? '#131313');
         const opts = p.align ? { align: p.align } : undefined;
         if (p.bullet) {
           doc.text('•  ', Object.assign({ continued: true }, opts));
@@ -123,6 +155,7 @@ export const pdfGenerator: Generator = {
         const colW = available / cols.length;
 
         const drawRow = (cells: string[], header: boolean) => {
+          doc.font(header ? FONT_BOLD : FONT_REG).fontSize(9);
           const rowH = Math.max(...cells.map((c) => doc.heightOfString(c, { width: colW - 8 })), 18) + 8;
           if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) doc.addPage();
 
@@ -131,7 +164,7 @@ export const pdfGenerator: Generator = {
             const x = doc.page.margins.left + i * colW;
             doc.rect(x, y, colW, rowH).strokeColor('#cccccc').lineWidth(0.5).stroke();
             if (header) doc.rect(x, y, colW, rowH).fillColor('#f2f2f2').fill();
-            doc.fillColor('#131313').font(header ? 'Helvetica-Bold' : 'Helvetica').fontSize(9);
+            doc.fillColor('#131313').fontSize(9);
             doc.text(c, x + 4, y + 4, { width: colW - 8 });
           });
           doc.y = y + rowH;

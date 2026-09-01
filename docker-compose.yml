@@ -18,6 +18,13 @@ services:
       ADMIN_ENABLED: "${ADMIN_ENABLED:-true}"
       ADMIN_HOST: "${ADMIN_HOST:-0.0.0.0}"
       ADMIN_PORT: "${ADMIN_PORT:-9800}"
+      TEMPLATE_DIR: "${TEMPLATE_DIR:-/app/templates}"
+      STYLE_TEMPLATE_DIR: "${STYLE_TEMPLATE_DIR:-/app/style-templates}"
+      DATA_DIR: "${DATA_DIR:-/app/admin-data}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin}"
+      ADMIN_SSO_ADMINS: "${ADMIN_SSO_ADMINS:-}"
+      ADMIN_SESSION_SECRET: "${ADMIN_SESSION_SECRET:-}"
       STORAGE_MODE: "${STORAGE_MODE:-local}"
       LOCAL_STORAGE_DIR: "${LOCAL_STORAGE_DIR:-/app/storage}"
       LOCAL_PUBLIC_BASE_URL: "${LOCAL_PUBLIC_BASE_URL:-http://localhost:${PORT:-9000}}"
@@ -33,6 +40,7 @@ services:
       - ./storage:/app/storage
       - ./templates:/app/templates
       - ./style-templates:/app/style-templates
+      - ./admin-data:/app/admin-data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s

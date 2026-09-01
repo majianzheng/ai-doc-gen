@@ -1,4 +1,4 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 
 /**
  * Zod schemas used both for MCP tool input validation and (via z.toJSONSchema
@@ -56,27 +56,34 @@ const imageItem = z.object({
   message: 'an image requires one of: data (base64), url, svg',
 });
 
+const usernameField = z.string().min(1).max(200).optional().describe(
+  'SSO username of the caller who is generating this document. Used to scope the generated file (only that user can see it in the admin UI) '
+  + 'and as the default author when author is not given. The platform (Dify / MCP gateway) normally sets this automatically; do not invent it.',
+);
+
 export const docxSchema = z.object({
   title: z.string().optional().describe('document title (rendered as a centered heading)'),
   author: z.string().optional().describe('document author/creator metadata'),
+  username: usernameField,
   paragraphs: z.array(paragraphItem).optional().describe('body content: headings, plain or bullet text with formatting'),
   tables: z.array(tableData).optional().describe('data tables rendered in the body'),
   images: z.array(imageItem).optional().describe('images (base64 / url / svg) appended after the body content'),
   footer: z.string().optional().describe('page footer text'),
   styleTemplateId: z.string().optional().describe('uuid of an uploaded .docx style template to inherit fonts/colors/heading styles from'),
-  filename: z.string().optional().describe('desired download file name without extension (defaults to a random hex id). The correct format extension is appended automatically.'),
+  filename: z.string().optional().describe('desired download file name without extension; omit to default to the document title (or a random id). The correct format extension is appended automatically.'),
 });
 
 export const pdfSchema = z.object({
   title: z.string().optional().describe('document title (rendered as a centered heading)'),
   author: z.string().optional().describe('document author metadata'),
+  username: usernameField,
   subject: z.string().optional().describe('document subject metadata'),
   paragraphs: z.array(paragraphItem).optional().describe('body content: headings, plain or bullet text with formatting'),
   tables: z.array(tableData).optional().describe('data tables rendered in the body'),
   images: z.array(imageItem).optional().describe('images (base64 / url / svg) appended after the body content'),
   footer: z.string().optional().describe('page footer text'),
   styleTemplateId: z.string().optional().describe('accepted for interface compatibility; style templates only apply to pptx/docx/xlsx'),
-  filename: z.string().optional().describe('desired download file name without extension (defaults to a random hex id). The correct format extension is appended automatically.'),
+  filename: z.string().optional().describe('desired download file name without extension; omit to default to the document title (or a random id). The correct format extension is appended automatically.'),
 });
 
 const sheetData = z.object({
@@ -88,9 +95,10 @@ const sheetData = z.object({
 
 export const xlsxSchema = z.object({
   title: z.string().optional().describe('workbook title metadata'),
+  username: usernameField,
   sheets: z.array(sheetData).min(1).describe('one or more worksheets'),
   styleTemplateId: z.string().optional().describe('uuid of an uploaded .xlsx style template to inherit theme/colors/fonts from'),
-  filename: z.string().optional().describe('desired download file name without extension (defaults to a random hex id). The correct format extension is appended automatically.'),
+  filename: z.string().optional().describe('desired download file name without extension; omit to default to the document title (or a random id). The correct format extension is appended automatically.'),
 });
 
 const slideData = z.object({
@@ -107,7 +115,9 @@ const slideData = z.object({
 export const pptxSchema = z.object({
   title: z.string().describe('presentation title (rendered as the title slide)'),
   author: z.string().optional().describe('presentation author'),
+  username: usernameField,
   slides: z.array(slideData).min(1).describe('content slides after the title slide'),
   styleTemplateId: z.string().optional().describe('uuid of an uploaded .pptx style template to inherit theme/colors/layout from'),
-  filename: z.string().optional().describe('desired download file name without extension (defaults to a random hex id). The correct format extension is appended automatically.'),
+  filename: z.string().optional().describe('desired download file name without extension; omit to default to the document title (or a random id). The correct format extension is appended automatically.'),
 });
+

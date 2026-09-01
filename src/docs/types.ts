@@ -124,6 +124,8 @@ export interface GeneratedDocument {
   mimeType: string;
   storageKey: string;
   createdAt: string;
+  /** username the file belongs to (undefined for legacy/global files) */
+  owner?: string;
 }
 
 export const MIME_TYPES: Record<DocFormat, string> = {
