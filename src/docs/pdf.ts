@@ -207,7 +207,8 @@ function renderPdf(input: PdfInput, opts: PdfRenderOptions): Promise<Buffer | Ma
         const display = pg != null ? `          ${pg}` : '';
         const text = (e.level === 1 ? '' : '     '.repeat(e.level - 1)) + e.text + display;
         doc.font(e.level === 1 ? FONT_BOLD : FONT_REG).fontSize(e.level === 1 ? 13 : 11).fillColor('#131313');
-        doc.text(text, { indent: 0, link: e.id });
+        // goTo 生成内部命名目的地跳转(/Dest)；link 会把字符串当外部 URL 导致跳到文件下载地址
+        doc.text(text, { indent: 0, goTo: e.id });
         doc.moveDown(0.3);
       }
       doc.addPage();
