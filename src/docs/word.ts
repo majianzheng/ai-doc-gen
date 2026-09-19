@@ -198,14 +198,14 @@ async function buildDocument(input: DocxInput): Promise<Document> {
     }));
   }
 
-  // 自动目录：仅当正文存在 1-3 级标题时插入，覆盖最多 3 级（TOC 域，WPS/Word 打开自动刷新）
-  const hasHeadings = (input.paragraphs ?? []).some((p) => p.level && p.level >= 1 && p.level <= 3);
+  // 自动目录：正文存在 1-6 级标题时插入，覆盖全部标题层级（TOC 域，WPS/Word 打开自动刷新）
+  const hasHeadings = (input.paragraphs ?? []).some((p) => p.level && p.level >= 1 && p.level <= 6);
   if (hasHeadings) {
     children.push(new Paragraph({
       heading: HeadingLevel.HEADING_1,
       children: [new TextRun({ text: '目录', bold: true })],
     }));
-    children.push(new TableOfContents({ caption: '', alignment: AlignmentType.LEFT, hyperlink: true, headingStyleRange: '1-3' } as never));
+    children.push(new TableOfContents({ caption: '', alignment: AlignmentType.LEFT, hyperlink: true, headingStyleRange: '1-6' } as never));
     children.push(new Paragraph({ children: [] }));
   }
 

@@ -126,7 +126,7 @@ export const pdfGenerator: Generator = {
     const toc: TocEntry[] = [];
     for (const p of docInput.paragraphs ?? []) {
       const lv = p.level ?? 0;
-      if (lv >= 1 && lv <= 3) toc.push({ id: 'toc-' + toc.length, level: lv, text: p.text });
+      if (lv >= 1 && lv <= 6) toc.push({ id: 'toc-' + toc.length, level: lv, text: p.text });
     }
     const hasToc = toc.length > 0;
 
@@ -231,7 +231,7 @@ function renderPdf(input: PdfInput, opts: PdfRenderOptions): Promise<Buffer | Ma
       doc.font(fontName(style, p.text)).fontSize(style.size).fillColor(p.color ?? '#131313');
       const pOpts = p.align ? { align: p.align } : undefined;
       const lv = p.level ?? 0;
-      const isHeading = lv >= 1 && lv <= 3;
+      const isHeading = lv >= 1 && lv <= 6;
       const indentOpt = (!isHeading && !p.bullet) ? { indent: 24 } : {};
       if (isHeading) {
         const id = tocIdFor(toc, headIdx++);
