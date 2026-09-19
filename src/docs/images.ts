@@ -239,3 +239,31 @@ export async function svgToPng(svg: Buffer): Promise<{ png: Buffer; width: numbe
   if (!rendered.width || !rendered.height) throw new Error('failed to rasterize SVG image');
   return { png: Buffer.from(rendered.asPng()), width: rendered.width, height: rendered.height };
 }
+/** Cache key for an image item (its identity by source). */
+function imageCacheKey(item: ImageItem): string {
+  if (item.url) return 'url:' + item.url;
+  if (item.svg !== undefined) return 'svg:' + item.svg.slice(0, 200);
+  const d = item.data ?? '';
+  return 'data:' + (d.startsWith('data:') ? d.slice(0, 256) : d.slice(0, 256));
+}
+
+/**
+ * resolveImage wrapped with a per-call cache so a document that is rendered
+ * twice (e.g. a PDF whose TOC needs a source pass to know page numbers) only
+ * downloads / decodes each image once.
+ */
+export async function resolveImageCached(
+  items: ImageItem[],
+): Promise<{ get(item: ImageItem): Promise<ResolvedImage>; clear(): void }> {
+  const cache = new Map<string, Promise<ResolvedImage>>();
+  const get = (item: ImageItem): Promise<ResolvedImage> => {
+    const key = imageCacheKey(item);
+    let p = cache.get(key);
+    if (!p) {
+      p = resolveImage(item);
+      cache.set(key, p);
+    }
+    return p;
+  };
+  return { get, clear: () => cache.clear() };
+}

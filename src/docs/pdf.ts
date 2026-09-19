@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import type { ImageItem, ParagraphItem, PdfInput } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
 import { markdownToPdf } from './markdown.js';
-import { computeSize, resolveImage, svgToPng } from './images.js';
+import { computeSize, resolveImage, resolveImageCached, svgToPng } from './images.js';
 
 /**
  * Bundled CJK-capable fonts (Source Han Sans SC). PDFKit's built-in Helvetica
@@ -70,9 +70,13 @@ async function imageForPdf(resolved: Awaited<ReturnType<typeof resolveImage>>): 
   );
 }
 
-function renderImages(doc: PDFKit.PDFDocument, images: ImageItem[]): Promise<void> {
+function renderImages(
+  doc: PDFKit.PDFDocument,
+  images: ImageItem[],
+  imgCache?: Awaited<ReturnType<typeof resolveImageCached>>,
+): Promise<void> {
   const tasks = images.map(async (img) => {
-    const resolved = await resolveImage(img);
+    const resolved = imgCache ? await imgCache.get(img) : await resolveImage(img);
     const renderable = await imageForPdf(resolved);
 
     let intrinsic: { width: number; height: number } | null = null;
@@ -116,77 +120,162 @@ export const pdfGenerator: Generator = {
     pdfInput.author = (input.author as string) || pdfInput.author;
     pdfInput.subject = (input.subject as string) || pdfInput.subject;
     pdfInput.footer = (input.footer as string) || pdfInput.footer;
-    input = pdfInput;
-    return new Promise((resolve, reject) => {
-      const info: Record<string, string | Date> = { Creator: 'ai-doc', CreationDate: new Date(), ModDate: new Date() };
-      if (input.title) info.Title = input.title;
-      if (input.author) info.Author = input.author;
-      if (input.subject) info.Subject = input.subject;
-      const doc = new PDFDocument({ size: 'A4', margin: 50, info });
-      registerFonts(doc);
-      const chunks: Buffer[] = [];
-      doc.on('data', (c: Buffer) => chunks.push(c));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      doc.on('error', reject);
+    const docInput = pdfInput;
 
-      doc.on('pageAdded', () => {
-        if (!input.footer) return;
-        doc.save();
-        doc.font(FONT_REG).fontSize(8).fillColor('#888888');
-        doc.text(input.footer, 50, doc.page.height - 40, { align: 'center', width: doc.page.width - 100 });
-        doc.restore();
-      });
+    interface TocEntry { id: string; level: number; text: string; }
+    const toc: TocEntry[] = [];
+    for (const p of docInput.paragraphs ?? []) {
+      const lv = p.level ?? 0;
+      if (lv >= 1 && lv <= 3) toc.push({ id: 'toc-' + toc.length, level: lv, text: p.text });
+    }
+    const hasToc = toc.length > 0;
 
-      if (input.title) {
-        doc.fontSize(24).font(FONT_BOLD).fillColor('#131313').text(input.title, { align: 'center' });
-        doc.moveDown();
-      }
-
-      for (const p of input.paragraphs ?? []) {
-        const style = fontStyle(p);
-        doc.font(fontName(style, p.text)).fontSize(style.size).fillColor(p.color ?? '#131313');
-        const opts = p.align ? { align: p.align } : undefined;
-        // 正文段落：首行缩进 2 字符（标题不加缩进），提升中文排版可读性
-        const isHeading = (p.level ?? 0) >= 1 && (p.level ?? 0) <= 3;
-        const indentOpt = (!isHeading && !p.bullet) ? { indent: 24 } : {};
-        if (p.bullet) {
-          doc.text('•  ', Object.assign({ continued: true }, opts));
-          doc.text(p.text, Object.assign({}, opts, indentOpt));
-        } else {
-          doc.text(p.text, Object.assign({}, opts, indentOpt));
+    return (async () => {
+      const imgCache = await resolveImageCached(docInput.images ?? []);
+      try {
+        if (!hasToc) {
+          return await renderPdf(docInput, { images: imgCache }) as Buffer;
         }
-        doc.moveDown(0.4);
+        // 第一遍：渲染正文（无目录页），为每个标题打 named destination 并记录其所在页码
+        const pageOf = await renderPdf(docInput, { images: imgCache, toc, collectPages: true });
+        const pageMap = pageOf instanceof Map ? pageOf : new Map<string, number>();
+        // 第二遍：先写目录页（点击跳转），再渲染正文（打锚点）
+        return await renderPdf(docInput, { images: imgCache, toc, prependToc: true, pageOf: pageMap }) as Buffer;
+      } finally {
+        imgCache.clear();
       }
-
-      for (const t of input.tables ?? []) {
-        doc.moveDown();
-        const cols = t.columns ?? Object.keys(t.rows[0] ?? {}).map((k) => ({ key: k, header: k }));
-        const available = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-        const colW = available / cols.length;
-
-        const drawRow = (cells: string[], header: boolean) => {
-          doc.font(header ? FONT_BOLD : FONT_REG).fontSize(9);
-          const rowH = Math.max(...cells.map((c) => doc.heightOfString(c, { width: colW - 8 })), 18) + 8;
-          if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) doc.addPage();
-
-          const y = doc.y;
-          cells.forEach((c, i) => {
-            const x = doc.page.margins.left + i * colW;
-            doc.rect(x, y, colW, rowH).strokeColor('#cccccc').lineWidth(0.5).stroke();
-            if (header) doc.rect(x, y, colW, rowH).fillColor('#f2f2f2').fill();
-            doc.fillColor('#131313').fontSize(9);
-            doc.text(c, x + 4, y + 4, { width: colW - 8 });
-          });
-          doc.y = y + rowH;
-        };
-
-        drawRow(cols.map((c: { header: string }) => c.header), true);
-        for (const row of t.rows) drawRow(cols.map((c: { key: string }) => String(row[c.key] ?? '')), false);
-        doc.moveDown(0.6);
-      }
-
-      const finish = () => { doc.end(); };
-      renderImages(doc, input.images ?? []).then(finish).catch((err) => doc.emit('error', err));
-    });
+    })();
   },
 };
+
+interface PdfRenderOptions {
+  images?: Awaited<ReturnType<typeof resolveImageCached>>;
+  collectPages?: boolean;
+  prependToc?: boolean;
+  toc?: Array<{ id: string; level: number; text: string }>;
+  pageOf?: Map<string, number>;
+}
+
+/** Render the whole PDF body. When `collectPages` is true it returns a map of
+ *  toc entry id -> page number and emits named destinations for each heading; a
+ *  later `prependToc` pass writes a clickable TOC page first, then re-renders
+ *  the body so the TOC links jump to the anchored headings. */
+function tocIdFor(entries: Array<{ id: string }>, index: number): string {
+  const e = entries[index];
+  return e ? e.id : 'toc-' + index;
+}
+
+function renderPdf(input: PdfInput, opts: PdfRenderOptions): Promise<Buffer | Map<string, number>> {
+  return new Promise((resolve, reject) => {
+    const info: Record<string, string | Date> = { Creator: 'ai-doc', CreationDate: new Date(), ModDate: new Date() };
+    if (input.title) info.Title = input.title;
+    if (input.author) info.Author = input.author;
+    if (input.subject) info.Subject = input.subject;
+    const doc = new PDFDocument({ size: 'A4', margin: 50, info });
+    registerFonts(doc);
+    const chunks: Buffer[] = [];
+    doc.on('data', (c: Buffer) => chunks.push(c));
+    doc.on('end', () => {
+      if (collect) resolve(pageOf);
+      else resolve(Buffer.concat(chunks));
+    });
+    doc.on('error', reject);
+
+    let pageCounter = 1;
+    const collect = !!opts.collectPages;
+    const prepend = !!opts.prependToc;
+    const toc = opts.toc ?? [];
+    const pageOf = opts.pageOf ?? new Map<string, number>();
+    // sequential index of the next heading we encounter in the body
+    let headIdx = 0;
+
+    doc.on('pageAdded', () => {
+      if (collect) pageCounter++;
+      if (!input.footer) return;
+      doc.save();
+      doc.font(FONT_REG).fontSize(8).fillColor('#888888');
+      doc.text(input.footer, 50, doc.page.height - 40, { align: 'center', width: doc.page.width - 100 });
+      doc.restore();
+    });
+
+    // ---- clickable TOC page (prependToc mode) ----
+    if (prepend && toc.length > 0) {
+      doc.font(FONT_BOLD).fontSize(18).fillColor('#131313').text('目 录', { align: 'center' });
+      doc.moveDown();
+      for (const e of toc) {
+        const pg = pageOf.get(e.id);
+        const display = pg != null ? `          ${pg}` : '';
+        const text = (e.level === 1 ? '' : '     '.repeat(e.level - 1)) + e.text + display;
+        doc.font(e.level === 1 ? FONT_BOLD : FONT_REG).fontSize(e.level === 1 ? 13 : 11).fillColor('#131313');
+        doc.text(text, { indent: 0, link: e.id });
+        doc.moveDown(0.3);
+      }
+      doc.addPage();
+      if (collect) pageCounter++;
+    } else if (collect && toc.length > 0) {
+      // 第一遍（collect）只确定页码：前置一个空"目录页"占位，使页码与最终
+      // 带目录的 PDF 对齐（目录页占第 1 页，正文从第 2 页计起）
+      doc.addPage();
+      pageCounter++;
+    }
+
+    // ---- title ----
+    if (input.title) {
+      doc.fontSize(24).font(FONT_BOLD).fillColor('#131313').text(input.title, { align: 'center' });
+      doc.moveDown();
+    }
+
+    // ---- body paragraphs; headings get a named destination + outline ----
+    for (const p of input.paragraphs ?? []) {
+      const style = fontStyle(p);
+      doc.font(fontName(style, p.text)).fontSize(style.size).fillColor(p.color ?? '#131313');
+      const pOpts = p.align ? { align: p.align } : undefined;
+      const lv = p.level ?? 0;
+      const isHeading = lv >= 1 && lv <= 3;
+      const indentOpt = (!isHeading && !p.bullet) ? { indent: 24 } : {};
+      if (isHeading) {
+        const id = tocIdFor(toc, headIdx++);
+        if (collect) pageOf.set(id, pageCounter);
+        // addNamedDestination 不在 @types/pdfkit 中，但 PDFKit 0.15 运行时支持该 API
+        (doc as unknown as { addNamedDestination: (name: string) => void }).addNamedDestination(id);
+        doc.outline.addItem(p.text, { expanded: false });
+      }
+      if (p.bullet) {
+        doc.text('•  ', Object.assign({ continued: true }, pOpts));
+        doc.text(p.text, Object.assign({}, pOpts, indentOpt));
+      } else {
+        doc.text(p.text, Object.assign({}, pOpts, indentOpt));
+      }
+      doc.moveDown(0.4);
+    }
+
+    // ---- tables ----
+    for (const t of input.tables ?? []) {
+      doc.moveDown();
+      const cols = t.columns ?? Object.keys(t.rows[0] ?? {}).map((k) => ({ key: k, header: k }));
+      const available = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const colW = available / cols.length;
+      const drawRow = (cells: string[], header: boolean) => {
+        doc.font(header ? FONT_BOLD : FONT_REG).fontSize(9);
+        const rowH = Math.max(...cells.map((c) => doc.heightOfString(c, { width: colW - 8 })), 18) + 8;
+        if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) { doc.addPage(); if (collect) pageCounter++; }
+        const y = doc.y;
+        cells.forEach((c, i) => {
+          const x = doc.page.margins.left + i * colW;
+          doc.rect(x, y, colW, rowH).strokeColor('#cccccc').lineWidth(0.5).stroke();
+          if (header) doc.rect(x, y, colW, rowH).fillColor('#f2f2f2').fill();
+          doc.fillColor('#131313').fontSize(9);
+          doc.text(c, x + 4, y + 4, { width: colW - 8 });
+        });
+        doc.y = y + rowH;
+      };
+      drawRow(cols.map((c: { header: string }) => c.header), true);
+      for (const row of t.rows) drawRow(cols.map((c: { key: string }) => String(row[c.key] ?? '')), false);
+      doc.moveDown(0.6);
+    }
+
+    renderImages(doc, input.images ?? [], opts.images)
+      .then(() => doc.end())
+      .catch((err) => doc.emit('error', err));
+  });
+}
