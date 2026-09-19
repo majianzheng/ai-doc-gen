@@ -4,7 +4,7 @@ import { docxGenerator } from './word.js';
 import { pdfGenerator } from './pdf.js';
 import { xlsxGenerator } from './excel.js';
 import { pptxGenerator } from './ppt.js';
-import { docxSchema, pdfSchema, xlsxSchema, pptxSchema } from './schemas.js';
+import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema } from './schemas.js';
 
 docxGenerator.inputSchema = docxSchema;
 pdfGenerator.inputSchema = pdfSchema;
@@ -28,4 +28,4 @@ export function listGenerators(): Generator[] {
   return Array.from(registry.values());
 }
 
-export { docxSchema, pdfSchema, xlsxSchema, pptxSchema };
+export { docxSchema, pdfSchema, xlsxSchema, pptxSchema, docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema };

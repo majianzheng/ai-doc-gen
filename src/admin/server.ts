@@ -2,20 +2,23 @@ import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import type { DocumentService } from '../core.js';
+import type { DocumentService, AuditSink } from '../core.js';
 import { ownerSlug } from '../core.js';
 import type { Config } from '../config.js';
 import type { Storage, StorageObjectInfo } from '../storage/storage.js';
 import { MIME_TYPES, type DocFormat } from '../docs/types.js';
-import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, listGenerators } from '../docs/index.js';
+import { docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema, listGenerators } from '../docs/index.js';
 import { TemplateStore, type TemplateInput } from './templates.js';
 import { StyleTemplateStore, SYSTEM_OWNER } from './styleTemplates.js';
+import { AuditLogStore } from './audit.js';
 import { UserStore } from './users.js';
 import { SessionManager } from './session.js';
 import { SsoConfigStore } from './sso/index.js';
 import { createAuth, type AuthContext } from './auth.js';
 
-const FORMAT_SCHEMAS = { docx: docxSchema, pdf: pdfSchema, xlsx: xlsxSchema, pptx: pptxSchema } as const;
+// Admin flows provide the caller identity from the logged-in session and the
+// file name separately, so they use the relaxed (admin) input schemas.
+const FORMAT_SCHEMAS = { docx: docxAdminSchema, pdf: pdfAdminSchema, xlsx: xlsxAdminSchema, pptx: pptxAdminSchema } as const;
 const SUPPORTED_FORMATS: DocFormat[] = ['docx', 'pdf', 'xlsx', 'pptx'];
 const STYLE_FORMATS: ('pptx' | 'docx' | 'xlsx')[] = ['pptx', 'docx', 'xlsx'];
 
@@ -43,17 +46,67 @@ function styleFormatFromFilename(filename: string): DocFormat | null {
   return null;
 }
 
-/** Infer the owner username from a storage key: the path segment just before
- *  the YYYY date directory. Legacy keys (no owner segment) are 'system'. */
-function inferOwner(key: string, users: UserStore): string {
+/** Owner path segment of a storage key (the segment just before the YYYY date
+ *  directory), or null when the file has no owner (i.e. it belongs to system).
+ *  Key form: [base/][owner/]YYYY/MM/DD/file */
+function ownerSegmentOf(key: string): string | null {
   const parts = key.split('/').filter(Boolean);
   const dateIdx = parts.findIndex((p) => /^\d{4}$/.test(p));
+  if (dateIdx < 0) return null;
   const ownerIdx = dateIdx > 0 ? dateIdx - 1 : -1;
-  // key can be [basePath]/[owner]/YYYY/MM/DD/file or [owner]/YYYY/... or YYYY/...
-  const candidate = ownerIdx >= 0 ? parts[ownerIdx] : undefined;
-  if (candidate === undefined) return 'system';
+  return ownerIdx >= 0 ? parts[ownerIdx] : null;
+}
+
+/** Best-effort reversal of `ownerSlug()`: plain ASCII is the identity, and every
+ *  `_x<hex>_` token is decoded back to its code point (so CJK / non-ASCII
+ *  usernames of callers that are not registered in the admin user store still
+ *  display as their real name). */
+function decodeSlug(slug: string): string {
+  let out = '';
+  let i = 0;
+  const n = slug.length;
+  while (i < n) {
+    if (slug[i] === '_' && slug[i + 1] === 'x') {
+      let j = i + 2;
+      while (j < n && /[0-9a-fA-F]/.test(slug[j])) j++;
+      if (j > i + 2 && slug[j] === '_') {
+        const cp = parseInt(slug.slice(i + 2, j), 16);
+        if (Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff) {
+          try { out += String.fromCodePoint(cp); } catch { out += slug.slice(i, j + 1); }
+          i = j + 1;
+          continue;
+        }
+      }
+    }
+    out += slug[i];
+    i++;
+  }
+  return out || 'system';
+}
+
+/** Rebuild a storage key with a different owner (filesystem-safe via ownerSlug).
+ *  `targetOwner === 'system'` removes the owner segment. Base-path segments that
+ *  precede the owner (when present) are preserved. */
+function rewriteKeyOwner(key: string, targetOwner: string): string {
+  const parts = key.split('/').filter(Boolean);
+  const dateIdx = parts.findIndex((p) => /^\d{4}$/.test(p));
+  if (dateIdx < 0) throw new Error(`unrecognized file key: ${key}`);
+  const head = parts.slice(0, dateIdx);
+  const base = head.length > 1 ? head.slice(0, head.length - 1) : [];
+  const ownerPart = targetOwner === 'system' ? [] : [ownerSlug(targetOwner)];
+  return [...base, ...ownerPart, ...parts.slice(dateIdx)].join('/');
+}
+
+/** Infer the owner username from a storage key. Legacy keys (no owner segment)
+ *  are 'system'. Files created by an identity that is not registered in the
+ *  admin user store (e.g. MCP / REST callers, even before their first SSO
+ *  login) keep their username: the raw slug is the identity for ASCII names and
+ *  is best-effort decoded for encoded (non-ASCII) names. */
+function inferOwner(key: string, users: UserStore): string {
+  const candidate = ownerSegmentOf(key);
+  if (candidate === null) return 'system';
   const known = users.list().find((u) => ownerSlug(u.username) === candidate);
-  return known ? known.username : 'system';
+  return known ? known.username : decodeSlug(candidate);
 }
 
 function fileBelongsToUser(key: string, username: string): boolean {
@@ -84,6 +137,8 @@ export interface AdminAppOptions {
   users: UserStore;
   sessions: SessionManager;
   ssoConfigStore: SsoConfigStore;
+  /** optional audit logger (wired at startup; admin-only visibility) */
+  audit?: AuditSink;
 }
 
 /**
@@ -99,9 +154,19 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
   app.set('trust proxy', true);
   app.use(express.json({ limit: '25mb' }));
 
-  const auth: AuthContext = createAuth({ config, users, sessions, ssoConfigStore });
+  const auth: AuthContext = createAuth({ config, users, sessions, ssoConfigStore, audit: options.audit });
   app.use(auth.sessionMiddleware);
   app.use(auth.router);
+
+  /** Record an audit event attributed to the current (or service) actor. */
+  const logAudit = (req: express.Request, input: { action: string; target?: string; detail?: string }): void => {
+    options.audit?.record({
+      actor: req.user?.username ?? 'system',
+      role: req.user?.role ?? 'system',
+      ip: req.ip,
+      ...input,
+    });
+  };
 
   const isAdmin = (req: express.Request) => req.user?.role === 'admin';
 
@@ -120,19 +185,58 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
   });
 
   // ---- generated files (scoped to the authenticated user) ----
+  // Supports pagination (page/limit) and server-side filtering by owner user
+  // (`owner`) and by name/format/owner (`q`). Returns the distinct list of file
+  // owners so the admin UI can offer an owner picker.
   app.get('/api/files', auth.requireAuth, async (req, res) => {
     try {
       if (!req.user) return;
-      const items = await storage.list();
       const admin = isAdmin(req);
-      const visible = admin ? items : items.filter((o) => fileBelongsToUser(o.key, req.user!.username));
-      res.json(visible.map((o) => toFileDto(o)));
+      const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+      const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10) || 20));
+      const ownerFilter = typeof req.query.owner === 'string' ? req.query.owner.trim() : '';
+      const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+
+      const all = await storage.list();
+      const visible = admin ? all : all.filter((o) => fileBelongsToUser(o.key, req.user!.username));
+
+      const rows = visible.map((o) => ({ info: o, owner: inferOwner(o.key, users) }));
+      const owners = [...new Set(rows.map((r) => r.owner))].sort((a, b) => {
+        if (a === 'system') return -1;
+        if (b === 'system') return 1;
+        return a.localeCompare(b);
+      });
+
+      let filtered = rows;
+      if (ownerFilter) {
+        filtered = filtered.filter((r) => r.owner.toLowerCase() === ownerFilter.toLowerCase());
+      }
+      if (q) {
+        filtered = filtered.filter((r) => {
+          const name = (r.info.key.split('/').pop() ?? '').toLowerCase();
+          const fmt = formatFromKey(r.info.key) ?? '';
+          return name.includes(q) || fmt.toLowerCase().includes(q) || r.owner.toLowerCase().includes(q);
+        });
+      }
+
+      const total = filtered.length;
+      const start = (page - 1) * limit;
+      const pageRows = filtered.slice(start, start + limit);
+
+      res.json({
+        items: pageRows.map((r) => toFileDto(r.info, r.owner)),
+        total,
+        page,
+        limit,
+        pages: Math.max(1, Math.ceil(total / limit)),
+        owners,
+      });
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }
   });
 
-  function toFileDto(o: StorageObjectInfo & { listedAt?: never }) {
+  function toFileDto(o: StorageObjectInfo & { listedAt?: never }, owner?: string) {
     return {
       key: o.key,
       name: o.key.split('/').pop(),
@@ -140,7 +244,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
       size: o.size,
       lastModified: o.lastModified ? o.lastModified.toISOString() : null,
       url: storage.url(o.key),
-      owner: inferOwner(o.key, users),
+      owner: owner ?? inferOwner(o.key, users),
       previewUrl: `/api/files/content?key=${b64url(o.key)}&disposition=inline`,
       downloadUrl: `/api/files/content?key=${b64url(o.key)}&disposition=attachment`,
     };
@@ -163,6 +267,9 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
         res.status(404).json({ error: 'file not found' });
         return;
       }
+      if (disposition === 'attachment') {
+        logAudit(req, { action: 'file.download', target: key });
+      }
       const fmt = formatFromKey(key);
       const name = key.split('/').pop() ?? key;
       res.setHeader('Content-Type', fmt ? MIME_TYPES[fmt] : 'application/octet-stream');
@@ -182,7 +289,36 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
     }
     try {
       await storage.delete(key);
+      logAudit(req, { action: 'file.delete', target: key });
       res.json({ ok: true, key });
+    } catch (err) {
+      res.status(500).json({ error: resolveError(err) });
+    }
+  });
+
+  // ---- reassign a file to another owner (admin-only) ----
+  // Moves the stored object under the target user's path. The target username
+  // does NOT need to exist in the local user store (the caller may not have
+  // logged in via SSO yet); it is always honored as the file's owner.
+  app.post('/api/files/transfer', auth.requireAdmin, async (req, res) => {
+    const b = (req.body ?? {}) as { key?: unknown; owner?: unknown };
+    const key = typeof b.key === 'string' ? b.key.trim() : '';
+    const owner = typeof b.owner === 'string' ? b.owner.trim() : '';
+    if (!key) { res.status(400).json({ error: 'file key is required' }); return; }
+    if (owner !== 'system' && !owner) { res.status(400).json({ error: 'target owner is required' }); return; }
+    if (owner.length > 200) { res.status(400).json({ error: 'owner is too long (max 200 chars)' }); return; }
+    try {
+      const buffer = await storage.get(key);
+      if (!buffer) { res.status(404).json({ error: 'file not found' }); return; }
+      const newKey = rewriteKeyOwner(key, owner);
+      if (newKey === key) { res.status(400).json({ error: 'the file already belongs to this owner' }); return; }
+      const fmt = formatFromKey(key);
+      const mimeType = fmt ? MIME_TYPES[fmt] : 'application/octet-stream';
+      // Write the new copy first, then remove the old one (safe if put fails).
+      await storage.put(buffer, { key: newKey, mimeType });
+      await storage.delete(key);
+      logAudit(req, { action: 'file.transfer', target: key, detail: `${key} -> ${newKey}` });
+      res.json(toFileDto({ key: newKey, size: buffer.length, lastModified: new Date() }, owner === 'system' ? 'system' : owner));
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }
@@ -238,6 +374,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
     }
     try {
       const tpl = await templates.create(check.value);
+      logAudit(req, { action: 'template.create', target: tpl.id, detail: `${tpl.name} (${tpl.format})` });
       res.status(201).json(tpl);
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
@@ -257,6 +394,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
     }
     try {
       const tpl = await templates.update(req.params.id, check.value);
+      logAudit(req, { action: 'template.update', target: tpl?.id ?? req.params.id, detail: tpl ? `${tpl.name} (${tpl.format})` : undefined });
       res.json(tpl);
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
@@ -269,6 +407,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
       res.status(404).json({ error: 'template not found' });
       return;
     }
+    logAudit(req, { action: 'template.delete', target: req.params.id });
     res.json({ ok: true, id: req.params.id });
   });
 
@@ -325,6 +464,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
       }
       const target = isAdmin(req) ? SYSTEM_OWNER : req.user!.username;
       const updated = await styleTemplates.setDefaultFor(format as 'pptx' | 'docx' | 'xlsx', id, target);
+      logAudit(req, { action: 'styletemplate.default', target: `format:${format}`, detail: `template=${id || '(none)'} scope=${target}` });
       res.json({ defaults: updated, effective: await styleTemplates.resolveDefault(format as 'pptx' | 'docx' | 'xlsx', target) });
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
@@ -360,6 +500,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
         return;
       }
       const meta = await styleTemplates.create({ name, format, filename, mimeType, buffer, owner });
+      logAudit(req, { action: 'styletemplate.upload', target: meta.id ?? filename, detail: `${meta.name} (${meta.format}) owner=${owner}` });
       res.status(201).json(meta);
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
@@ -379,6 +520,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
         return;
       }
       await styleTemplates.remove(meta.id);
+      logAudit(req, { action: 'styletemplate.delete', target: meta.id, detail: meta.name });
       res.json({ ok: true, id: meta.id });
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
@@ -420,8 +562,45 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
         styleTemplateId,
         filename: b.filename,
         owner: req.user.username,
+        role: req.user.role,
       });
       res.status(201).json(doc);
+    } catch (err) {
+      res.status(500).json({ error: resolveError(err) });
+    }
+  });
+
+  // ---- audit log (admin-only) ----
+  app.get('/api/audit', auth.requireAdmin, async (req, res) => {
+    if (!req.user) return;
+    try {
+      if (!(options.audit instanceof AuditLogStore)) {
+        res.status(501).json({ error: 'audit log is not configured' });
+        return;
+      }
+      const page = await options.audit.list({
+        page: Number(req.query.page) || 1,
+        limit: Number(req.query.limit) || 20,
+        actor: typeof req.query.actor === 'string' ? req.query.actor : undefined,
+        action: typeof req.query.action === 'string' ? req.query.action : undefined,
+        q: typeof req.query.q === 'string' ? req.query.q : undefined,
+      });
+      res.json(page);
+    } catch (err) {
+      res.status(500).json({ error: resolveError(err) });
+    }
+  });
+
+  app.delete('/api/audit', auth.requireAdmin, async (req, res) => {
+    if (!req.user) return;
+    try {
+      if (!(options.audit instanceof AuditLogStore)) {
+        res.status(501).json({ error: 'audit log is not configured' });
+        return;
+      }
+      await options.audit.clear();
+      logAudit(req, { action: 'audit.clear' });
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: resolveError(err) });
     }

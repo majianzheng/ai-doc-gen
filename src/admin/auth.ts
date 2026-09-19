@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import type { Config } from '../config.js';
+import type { AuditSink } from '../core.js';
 import { UserStore, type User } from './users.js';
 import { SessionManager } from './session.js';
 import { SsoConfigStore, validateConfig, ssoStart, ssoCallback, samlLoadMetadata, fieldSchema, type SsoConfig } from './sso/index.js';
@@ -54,6 +55,7 @@ export interface AuthDeps {
   users: UserStore;
   sessions: SessionManager;
   ssoConfigStore: SsoConfigStore;
+  audit?: AuditSink;
 }
 
 export interface AuthContext {
@@ -67,6 +69,16 @@ export interface AuthContext {
 export function createAuth(deps: AuthDeps): AuthContext {
   const { config, users, sessions, ssoConfigStore } = deps;
   const router = Router();
+
+  /** Record an audit event titled to the current actor (or an explicit one). */
+  const logAudit = (req: Request, input: { action: string; target?: string; detail?: string }, actor?: { username: string; role: string }): void => {
+    deps.audit?.record({
+      actor: actor?.username ?? req.user?.username ?? 'system',
+      role: actor?.role ?? req.user?.role ?? 'system',
+      ip: req.ip,
+      ...input,
+    });
+  };
 
   /** resolve session from cookie into req.user (never blocks) */
   const sessionMiddleware = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
@@ -115,6 +127,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       locale: user.locale,
     });
     setCookie(res, sessions.cookieValue(token, secureFlag(req)));
+    logAudit(req, { action: 'login' }, { username: user.username, role: user.role });
     res.json({ user: publicUser(user) });
   });
 
@@ -128,6 +141,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
   });
 
   router.post('/api/auth/logout', (req, res) => {
+    logAudit(req, { action: 'logout' });
     setCookie(res, sessions.clearCookieValue(secureFlag(req)));
     res.json({ ok: true });
   });
@@ -146,6 +160,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       res.status(422).json({ error: result.error ?? 'failed to update password' });
       return;
     }
+    logAudit(req, { action: 'auth.password' });
     res.json({ ok: true });
   });
 
@@ -173,6 +188,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       const incoming = await ssoConfigStore.get();
       if (patch.oidc?.clientSecret === MASK) patch.oidc = { ...patch.oidc, clientSecret: incoming.oidc.clientSecret };
       const saved = await ssoConfigStore.update(patch);
+      logAudit(req, { action: 'sso.update', target: 'sso-config', detail: `provider=${saved.provider} enabled=${saved.enabled}` });
       res.json({ config: maskConfig(saved), errors: validateConfig(saved) });
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
@@ -272,6 +288,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       });
       setCookie(res, sessions.cookieValue(token, secureFlag(req)));
       setCookie(res, `aidoc_sso_relay=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+      logAudit(req, { action: 'login', detail: 'sso:' + providerType }, { username: result.user.username, role: result.user.role });
       res.redirect(relay);
     } catch (err) {
       res.redirect('/login?ssoerror=' + encodeURIComponent((err as Error).message));
@@ -302,6 +319,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       res.status(422).json({ error: result.error });
       return;
     }
+    logAudit(req, { action: 'user.create', target: username, detail: `role=${b.role === 'admin' ? 'admin' : 'user'}` });
     res.status(201).json({ user: publicUser(result.user) });
   });
 
@@ -316,6 +334,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       res.status(result.error === 'user not found' ? 404 : 400).json({ error: result.error ?? 'failed' });
       return;
     }
+    logAudit(req, { action: 'user.role', target: req.params.username, detail: `role=${role}` });
     res.json({ ok: true });
   });
 
@@ -326,6 +345,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       res.status(404).json({ error: result.error ?? 'user not found' });
       return;
     }
+    logAudit(req, { action: 'user.rename', target: req.params.username, detail: `displayName=${name}` });
     res.json({ ok: true });
   });
 
@@ -336,6 +356,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       res.status(result.invalid ? 404 : 422).json({ error: result.error ?? 'failed' });
       return;
     }
+    logAudit(req, { action: 'user.password', target: req.params.username });
     res.json({ ok: true });
   });
 
@@ -345,6 +366,7 @@ export function createAuth(deps: AuthDeps): AuthContext {
       res.status(result.error === 'user not found' ? 404 : 400).json({ error: result.error ?? 'user not found' });
       return;
     }
+    logAudit(req, { action: 'user.delete', target: req.params.username });
     res.json({ ok: true });
   });
 

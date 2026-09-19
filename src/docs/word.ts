@@ -18,6 +18,7 @@ import JSZip from 'jszip';
 import type { DocxInput, ImageItem, ParagraphItem, TableData } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
 import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
+import { markdownToDocx } from './markdown.js';
 
 function docxLevel(level: number | undefined): string | undefined {
   if (!level || level < 1) return undefined;
@@ -188,8 +189,12 @@ export const docxGenerator: Generator = {
   format: 'docx',
   mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   extension: 'docx',
-  async generate(input: DocxInput, ctx?: GenerateContext): Promise<Buffer> {
-    const buffer = await Packer.toBuffer(await buildDocument(input));
+  async generate(input: any, ctx?: GenerateContext): Promise<Buffer> {
+    const docs = markdownToDocx(String(input?.content || ''));
+    docs.title = (input.title as string) || docs.title;
+    docs.author = (input.author as string) || docs.author;
+    docs.footer = (input.footer as string) || docs.footer;
+    const buffer = await Packer.toBuffer(await buildDocument(docs));
     if (ctx?.styleTemplate) {
       try {
         return await applyStyleTemplate(buffer, ctx.styleTemplate);

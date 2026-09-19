@@ -17,15 +17,42 @@ parameters:
   placeholder:
     en_US: http://127.0.0.1:3000
   form: form
+- name: username
+  type: string
+  required: true
+  label:
+    en_US: Username
+    zh_Hans: 用户名
+  human_description:
+    en_US: 'REQUIRED: the SSO username of the user generating this document. The file
+      is scoped to this user (not "system"). Fill it with the current user identity,
+      do not invent one.'
+    zh_Hans: 必填:发起生成的用户(SSO 用户名)。文档将归属到该用户而不是【系统】。请填当前真实用户,
+      不要编造。
+  placeholder:
+    en_US: e.g. zhangsan
+    zh_Hans: 例如 zhangsan
+  form: llm
+- name: filename
+  type: string
+  required: true
+  label:
+    en_US: File name
+    zh_Hans: 文件名
+  human_description:
+    en_US: 'REQUIRED: download file name WITHOUT extension, concise and readable, e.g.
+      Q3经营报告 / 2025年度总结.'
+    zh_Hans: 必填:下载文件名(不含扩展名),简洁可读,如 Q3经营报告、2025年度总结。
+  form: llm
 - name: title
   type: string
-  required: false
+  required: true
   label:
     en_US: Title
     zh_Hans: 标题
   human_description:
-    en_US: Document title (rendered as a centered heading).
-    zh_Hans: 文档标题(居中显示)。
+    en_US: REQUIRED. Document title (rendered as a centered heading).
+    zh_Hans: 必填。文档标题(居中显示)。
   form: llm
 - name: author
   type: string
@@ -35,15 +62,16 @@ parameters:
   form: llm
 - name: paragraphs
   type: array
-  required: false
+  required: true
   label:
     en_US: Paragraphs
     zh_Hans: 段落
   human_description:
-    en_US: 'Ordered body content. Each item: {text, level (1-6 heading, omit for body),
-      bold, italic, bullet, align(left/center/right/justify), fontSize, color(#RRGGBB)}.'
-    zh_Hans: 有序正文内容。每项:{text 文本, level 标题级别1-6(正文省略), bold 加粗, italic 斜体, bullet 项目符号,
-      align 对齐, fontSize 字号, color 颜色}。
+    en_US: 'REQUIRED, at least 1. Ordered body content. Each item: {text, level (1-6
+      heading, omit for body), bold, italic, bullet, align(left/center/right/justify),
+      fontSize, color(#RRGGBB)}.'
+    zh_Hans: 必填,至少 1 段。有序正文内容。每项:{text 文本, level 标题级别1-6(正文省略), bold 加粗,
+      italic 斜体, bullet 项目符号, align 对齐, fontSize 字号, color 颜色}。
   form: llm
 - name: tables
   type: array
@@ -64,7 +92,11 @@ description:
     en_US: Create a Microsoft Word (.docx) document from a title, ordered paragraphs
       (headings, bullets, alignment) and tables. Returns a public download link.
     zh_Hans: 根据标题、有序段落(标题级别/项目符号/对齐)和表格生成 Word (.docx) 文档,返回公开下载链接。
-  llm: 'Create a Microsoft Word (.docx) document. Provide structured content: title,
-    paragraphs (with optional level 1-6 headings, bold, italic, bullet, align, fontSize,
-    color), and tables (columns + rows). The tool returns a JSON object with a public
-    download url.'
+  llm: 'Create a Microsoft Word (.docx) document. REQUIRED arguments that must always
+    be provided: username (current user identity, so the file belongs to that user,
+    not "system"), filename (download name WITHOUT extension), title, and paragraphs
+    (at least 1 item, with optional level 1-6 headings, bold, italic, bullet, align,
+    fontSize, color). Tables (columns + rows) are optional. Before calling, tell the
+    user you are generating the document; after the call, show the user the returned
+    download url and report success or the failure reason. The tool returns a JSON
+    object with a public download url.'

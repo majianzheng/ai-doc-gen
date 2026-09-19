@@ -17,12 +17,42 @@ parameters:
   placeholder:
     en_US: http://127.0.0.1:3000
   form: form
+- name: username
+  type: string
+  required: true
+  label:
+    en_US: Username
+    zh_Hans: 用户名
+  human_description:
+    en_US: 'REQUIRED: the SSO username of the user generating this document. The file
+      is scoped to this user (not "system"). Fill it with the current user identity,
+      do not invent one.'
+    zh_Hans: 必填:发起生成的用户(SSO 用户名)。文档将归属到该用户而不是【系统】。请填当前真实用户,
+      不要编造。
+  placeholder:
+    en_US: e.g. zhangsan
+    zh_Hans: 例如 zhangsan
+  form: llm
+- name: filename
+  type: string
+  required: true
+  label:
+    en_US: File name
+    zh_Hans: 文件名
+  human_description:
+    en_US: 'REQUIRED: download file name WITHOUT extension, concise and readable, e.g.
+      渠道汇报.'
+    zh_Hans: 必填:下载文件名(不含扩展名),简洁可读,如 渠道汇报、Q3经营汇报。
+  form: llm
 - name: title
   type: string
   required: true
   label:
     en_US: Presentation Title
     zh_Hans: 演示文稿标题
+  human_description:
+    en_US: REQUIRED. Presentation title (also the title slide).
+    zh_Hans: 必填。演示文稿标题(也是首页标题页)。
   form: llm
 - name: author
   type: string
@@ -37,15 +67,21 @@ parameters:
     en_US: Slides
     zh_Hans: 幻灯片
   human_description:
-    en_US: 'Content slides. Each item: {title, subtitle, bullets:[string], layout("title"|"title_content"),
-      footer}.'
-    zh_Hans: 内容页。每项:{title 标题, subtitle 副标题, bullets 要点列表, layout 布局, footer 页脚}。
+    en_US: 'REQUIRED, at least 1. Content slides. Each item: {title, subtitle, bullets:[string],
+      layout("title"|"title_content"), footer}.'
+    zh_Hans: 必填,至少 1 页。内容页。每项:{title 标题, subtitle 副标题, bullets 要点列表, layout 布局,
+      footer 页脚},也可含 tables/images。
   form: llm
 description:
   human:
     en_US: Create a PowerPoint presentation with a title slide plus content slides
       (title/subtitle/bullets). Returns a public download link.
     zh_Hans: 生成包含标题页和内容页(标题/副标题/要点)的 PowerPoint(.pptx),返回公开下载链接。
-  llm: 'Create a PowerPoint (.pptx) presentation. Provide title, optional author,
-    and slides: [{title, subtitle, bullets:[string], layout("title"|"title_content")}].
-    The tool returns a JSON object with a public download url.'
+  llm: 'Create a PowerPoint (.pptx) presentation. REQUIRED arguments that must always
+    be provided: username (current user identity, so the file belongs to that user,
+    not "system"), filename (download name WITHOUT extension), title (also the title
+    slide), and slides (at least 1: [{title, subtitle, bullets:[string], layout("title"|"title_content")}],
+    may also contain tables/images). Before calling, tell the user you are generating
+    the document; after the call, show the user the returned download url and report
+    success or the failure reason. The tool returns a JSON object with a public download
+    url.'

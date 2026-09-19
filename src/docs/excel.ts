@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import type { ImageItem, SheetData, XlsxInput } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
+import { markdownToXlsx } from './markdown.js';
 import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
 
 /**
@@ -71,7 +72,9 @@ export const xlsxGenerator: Generator = {
   format: 'xlsx',
   mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   extension: 'xlsx',
-  async generate(input: XlsxInput, ctx?: GenerateContext): Promise<Buffer> {
+  async generate(input: any, ctx?: GenerateContext): Promise<Buffer> {
+    const x = markdownToXlsx(String(input?.content || ''));
+    input = x;
     const wb = new ExcelJS.Workbook();
     if (ctx?.styleTemplate) {
       try {

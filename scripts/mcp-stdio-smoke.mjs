@@ -15,14 +15,14 @@ for (const t of tools.tools) {
   const d = t.description ?? '';
   const first = d.split('\n').find((l) => l.trim().length > 0) ?? '';
   console.log(`TOOL ${t.name} descLen=${d.length} | ${first.slice(0, 90)}`);
-  console.log(`  has-example=${d.includes('Example:')} has-images=${d.includes('images (array, optional)')}`);
+  console.log(`  has-example=${d.includes('调用示例')} has-required=${d.includes('REQUIRED')} required-fields=${JSON.stringify(t.inputSchema?.required ?? [])}`);
 }
 console.log('TOOLS LIST DONE');
 
-const res = await client.callTool({ name: 'generate_excel_xlsx', arguments: { sheets: [{ name: 'Sheet1', rows: [{ a: 1, b: 'x' }] }] } });
+const res = await client.callTool({ name: 'generate_excel_xlsx', arguments: { username: 'zhangsan', filename: '台账', title: '台账', sheets: [{ name: 'Sheet1', rows: [{ a: 1, b: 'x' }] }] } });
 console.log('XLSX via stdio:', JSON.parse(res.content[0].text).url);
 
-const res2 = await client.callTool({ name: 'generate_powerpoint_pptx', arguments: { title: 'Deck', slides: [{ title: 'S1', bullets: ['a', 'b'] }] } });
+const res2 = await client.callTool({ name: 'generate_powerpoint_pptx', arguments: { username: 'zhangsan', filename: 'Deck', title: 'Deck', slides: [{ title: 'S1', bullets: ['a', 'b'] }] } });
 console.log('PPTX via stdio:', JSON.parse(res2.content[0].text).url);
 
 const res3 = await client.readResource({ uri: 'documents://formats' });

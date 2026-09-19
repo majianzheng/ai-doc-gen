@@ -1,18 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { normalize } from 'node:path';
 import express from 'express';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { DocumentService } from '../core.js';
 import type { Config } from '../config.js';
+import { createMcpServer } from '../mcp/server.js';
 import { LocalStorage } from '../storage/local.js';
 import { docxSchema, pdfSchema, xlsxSchema, pptxSchema } from '../docs/index.js';
 import type { DocFormat } from '../docs/types.js';
 
 const MAX_BODY = '25mb';
 
-export function createHttpApp(options: { config: Config; service: DocumentService; mcpServer: McpServer; storage: unknown }): express.Express {
-  const { config, service, mcpServer, storage } = options;
+export function createHttpApp(options: { config: Config; service: DocumentService; storage: unknown }): express.Express {
+  const { config, service, storage } = options;
   const app = express();
   app.use(express.json({ limit: MAX_BODY }));
 
@@ -52,7 +52,7 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
       },
     });
     transport.onclose = () => { transports.delete(String(transport.sessionId)); };
-    await mcpServer.connect(transport);
+    await createMcpServer(service).connect(transport);
     await transport.handleRequest(req, res, req.body);
   });
 
@@ -72,7 +72,7 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
     });
     if (!transport) {
       t.onclose = () => { transports.delete(String(t.sessionId)); };
-      await mcpServer.connect(t);
+      await createMcpServer(service).connect(t);
     }
     await t.handleRequest(req, res, req.body);
   });

@@ -279,7 +279,7 @@ body.sidebar-collapsed .main { margin-left: 0; }
 }
 .page-head h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; }
 .page-sub { margin: 0; color: var(--muted); font-size: 13px; }
-.head-actions { display: flex; gap: 10px; align-items: center; }
+.head-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* ================= inputs ================= */
 .input {
@@ -444,6 +444,22 @@ body.sidebar-collapsed .main { margin-left: 0; }
 }
 .empty p { margin: 0; }
 .empty-ico { width: 42px; height: 42px; opacity: 0.4; }
+
+/* ================= table footer / pagination ================= */
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.files-count { font-size: 13px; }
+.pagination { display: flex; align-items: center; gap: 8px; }
+.pagination-info { font-size: 13px; color: var(--muted); min-width: 96px; text-align: center; }
+.btn-small { padding: 6px 10px; }
+.owner-select { max-width: 180px; }
 
 /* ================= templates layout ================= */
 .tpl-layout { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
@@ -826,6 +842,7 @@ body.sidebar-collapsed .main { margin-left: 0; }
   .main, body.sidebar-collapsed .main { margin-left: 0; }
   .content { padding: 18px 16px 50px; }
   .search-input { width: 150px; }
+  .owner-select { max-width: 130px; }
 }
 
 /* ================= app hidden (login gate) ================= */
@@ -944,6 +961,13 @@ body.sidebar-collapsed .main { margin-left: 0; }
 .modal-sm { width: min(400px, 100%); height: auto; }
 .pwd-body { display: flex; flex-direction: column; gap: 12px; padding: 20px; }
 .pwd-body .input { padding: 11px 14px; font-size: 14px; }
+.transfer-file { margin: 0 0 4px; word-break: break-all; }
+.nowrap { white-space: nowrap; }
+.audit-action {
+  display: inline-block; padding: 1px 9px; font-size: 11px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--primary);
+}
+.audit-ip { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 /* ================= upload-as-system toggle ================= */
 .upload-toggle {

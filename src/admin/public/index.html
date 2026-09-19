@@ -63,6 +63,10 @@
         <svg viewBox="0 0 24 24" class="nav-ico" aria-hidden="true"><path d="M6 9V7a6 6 0 0 1 12 0v2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="9" width="16" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="14.5" r="1.4" fill="currentColor"/><path d="M12 15.9V18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <span data-i18n="nav.sso">SSO 登录</span>
       </button>
+      <button class="nav-item" data-tab="audit" data-admin-only>
+        <svg viewBox="0 0 24 24" class="nav-ico" aria-hidden="true"><path d="M12 3v10l4 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span data-i18n="nav.audit">审计日志</span>
+      </button>
     </nav>
 
     <div class="sidebar-footer">
@@ -132,6 +136,7 @@
           </div>
           <div class="head-actions">
             <input id="fileSearch" type="search" class="input search-input" data-i18n-placeholder="files.searchPlaceholder" />
+            <select id="fileOwner" class="input owner-select" data-admin-only data-i18n-title="files.ownerFilter" aria-label="owner filter"></select>
             <button id="fileRefresh" class="btn">
               <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 6M20 5v6h-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <span data-i18n="files.refresh">刷新</span>
@@ -156,6 +161,18 @@
           <div id="fileEmpty" class="empty hidden">
             <svg viewBox="0 0 24 24" class="empty-ico" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M14 2v6h6M9 13h6M9 17h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
             <p data-i18n="files.empty">暂无生成文件</p>
+          </div>
+          <div class="table-footer" id="filePagination">
+            <span class="muted files-count" id="fileCount"></span>
+            <div class="pagination">
+              <button id="filePrev" class="btn btn-small" disabled aria-label="prev">
+                <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <span class="pagination-info" id="filePageInfo"></span>
+              <button id="fileNext" class="btn btn-small" disabled aria-label="next">
+                <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -376,6 +393,61 @@
           <div id="ssoMsg" class="editor-status"></div>
         </div>
       </section>
+
+      <!-- ============ 审计日志(仅管理员) ============ -->
+      <section id="view-audit" class="view">
+        <div class="page-head">
+          <div>
+            <h2 data-i18n="audit.title">审计日志</h2>
+            <p class="page-sub" data-i18n="audit.subtitle">记录登录、文件、模板、用户与 SSO 等操作,便于追踪</p>
+          </div>
+          <div class="head-actions">
+            <input id="auditSearch" type="search" class="input search-input" data-i18n-placeholder="audit.search" />
+            <input id="auditActor" type="search" class="input search-input" data-i18n-placeholder="audit.actor" />
+            <select id="auditAction" class="input owner-select"></select>
+            <button id="auditRefresh" class="btn">
+              <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 6M20 5v6h-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span data-i18n="audit.refresh">刷新</span>
+            </button>
+            <button id="auditClear" class="btn btn-danger">
+              <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span data-i18n="audit.clear">清空日志</span>
+            </button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="table-scroll">
+            <table class="table" id="auditTable">
+              <thead>
+                <tr>
+                  <th data-i18n="audit.col.time">时间</th>
+                  <th data-i18n="audit.col.actor">操作人</th>
+                  <th data-i18n="audit.col.action">操作类型</th>
+                  <th data-i18n="audit.col.target">目标</th>
+                  <th data-i18n="audit.col.detail">详情</th>
+                </tr>
+              </thead>
+              <tbody id="auditRows"></tbody>
+            </table>
+          </div>
+          <div id="auditEmpty" class="empty hidden">
+            <svg viewBox="0 0 24 24" class="empty-ico" aria-hidden="true"><path d="M12 3v10l4 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <p data-i18n="audit.empty">暂无审计记录</p>
+          </div>
+          <div class="table-footer" id="auditPagination">
+            <span class="muted files-count" id="auditCount"></span>
+            <div class="pagination">
+              <button id="auditPrev" class="btn btn-small" disabled aria-label="prev">
+                <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <span class="pagination-info" id="auditPageInfo"></span>
+              <button id="auditNext" class="btn btn-small" disabled aria-label="next">
+                <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
   </div><!-- /appView -->
@@ -395,6 +467,35 @@
         <input id="pwdConfirm" type="password" class="input login-input" autocomplete="new-password" data-i18n-placeholder="account.confirmPwd" />
         <div id="pwdError" class="login-error hidden"></div>
         <button id="pwdSave" class="btn btn-primary btn-block" data-i18n="account.save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 分配文件归属弹窗 ============ -->
+  <div id="transferModal" class="modal-overlay hidden">
+    <div class="modal modal-sm">
+      <div class="modal-head">
+        <h3 data-i18n="files.transfer.title">分配文件归属</h3>
+        <button id="transferClose" class="btn btn-ghost">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body pwd-body">
+        <p id="transferFileLabel" class="transfer-file muted small"></p>
+        <div class="form-row">
+          <label class="field grow">
+            <span class="field-label" data-i18n="files.transfer.select">选择用户</span>
+            <select id="transferOwner" class="input"></select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label class="field grow">
+            <span class="field-label" data-i18n="files.transfer.optional">或输入新的用户名(无需注册/SSO 登录过)</span>
+            <input id="transferOwnerCustom" type="text" class="input" data-i18n-placeholder="files.transfer.customPh" autocomplete="off" />
+          </label>
+        </div>
+        <div id="transferError" class="login-error hidden"></div>
+        <button id="transferSave" class="btn btn-primary btn-block" data-i18n="files.transfer.assign">分配</button>
       </div>
     </div>
   </div>

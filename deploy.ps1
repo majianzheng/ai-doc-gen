@@ -109,6 +109,28 @@ if (-not $ok) {
     exit 1
 }
 
+# 6. Prune stale images left behind by previous builds.
+# Rebuilding with --no-cache gives a NEW image ID whenever the source changed,
+# which orphans the previous tagged image as an untagged <none> (dangling)
+# image. Compose does not label built images here (label filter won't work), so
+# we scope by dangling=true only: dangling images have no tag and are referenced
+# by no container, so removing them is always safe and never affects the running
+# deployment. Runs only after the container is confirmed healthy.
+Write-Host "==> Pruning stale (<none>) build images" -ForegroundColor Cyan
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$pruneOut = ssh.exe $Server "docker image prune -f --filter dangling=true"
+$ErrorActionPreference = $prevEAP
+$pruneText = $pruneOut -join "`n"
+if ($pruneText -match 'Deleted Images:') {
+    $deleted = ($pruneText -split "`r?`n" | Where-Object { $_ -match '^\s*deleted:\s*sha256:' }).Count
+    Write-Host "  removed $deleted stale image(s)" -ForegroundColor Green
+} elseif ([string]::IsNullOrWhiteSpace($pruneText)) {
+    Write-Host "  nothing to prune" -ForegroundColor Gray
+} else {
+    Write-Host ($pruneText -replace "`r`n", "`n") -ForegroundColor Gray
+}
+
 # Done
 $ip = $Server.Split('@')[-1]
 # NOTE: these commands run in the remote *bash* shell, so use `head`, not a PowerShell cmdlet.

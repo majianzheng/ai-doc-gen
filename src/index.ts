@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { createStorage } from './storage/index.js';
 import { DocumentService } from './core.js';
-import { createMcpServer, runMcpStdio } from './mcp/server.js';
+import { runMcpStdio } from './mcp/server.js';
 import { createHttpApp } from './http/server.js';
 import { createAdminApp } from './admin/server.js';
 import { TemplateStore } from './admin/templates.js';
@@ -11,6 +11,7 @@ import { StyleTemplateStore, type StyleTemplateSeed } from './admin/styleTemplat
 import { UserStore } from './admin/users.js';
 import { SessionManager, loadSessionSecret } from './admin/session.js';
 import { SsoConfigStore } from './admin/sso/index.js';
+import { AuditLogStore } from './admin/audit.js';
 
 /** Register bundled files as per-format default style templates (pptx by
  *  default). Only runs on the first startup per style-template directory, and
@@ -42,18 +43,19 @@ async function main(): Promise<void> {
   const storage = createStorage(config);
   const templates = new TemplateStore(config.templateDir);
   const styleTemplates = new StyleTemplateStore(config.styleTemplateDir);
+  const audit = new AuditLogStore(config.data.dir);
   await templates.init();
   await styleTemplates.init();
+  await audit.init();
   await seedDefaultStyleTemplates(styleTemplates);
-  const service = new DocumentService(storage, {}, styleTemplates);
-  const server = createMcpServer(service);
+  const service = new DocumentService(storage, {}, styleTemplates, audit);
 
   if (config.transport === 'stdio') {
     await runMcpStdio(service);
     return;
   }
 
-  const app = createHttpApp({ config, service, mcpServer: server, storage });
+  const app = createHttpApp({ config, service, storage });
   app.listen(config.http.port, config.http.host, () => {
     // eslint-disable-next-line no-console
     console.log(`[ai-doc] MCP server listening on http://${config.http.host}:${config.http.port}${config.mcpPath}`);
@@ -77,7 +79,7 @@ async function main(): Promise<void> {
     const sessionSecret = await loadSessionSecret(config.data.dir, process.env.ADMIN_SESSION_SECRET);
     const accounts = new SessionManager(sessionSecret);
     const ssoConfig = new SsoConfigStore(config.data.dir);
-    const adminApp = createAdminApp({ config, service, storage, templates, styleTemplates, users, sessions: accounts, ssoConfigStore: ssoConfig });
+    const adminApp = createAdminApp({ config, service, storage, templates, styleTemplates, users, sessions: accounts, ssoConfigStore: ssoConfig, audit });
     adminApp.listen(config.admin.port, config.admin.host, () => {
       // eslint-disable-next-line no-console
       console.log(`[ai-doc] Admin UI: http://localhost:${config.admin.port}/  (port ${config.admin.port}, separated from the service port ${config.http.port})`);

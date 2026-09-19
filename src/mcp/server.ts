@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { DocumentService } from '../core.js';
@@ -6,77 +7,100 @@ import type { GeneratedDocument } from '../docs/types.js';
 
 /**
  * Builds and returns the MCP server with one tool per supported document
- * format. Tool descriptions are intentionally verbose: agents rely on them to
- * build valid payloads, so each description documents every field, the
- * supported image forms (SVG / base64 / URL), tables, style templates and a
- * complete JSON example. Every tool returns a public download link.
+ * format.
+ *
+ * Every tool enforces the same mandatory fields inside its input schema so a
+ * missing/empty required field fails with a clear reason the agent can read:
+ *  - username  (REQUIRED) — the caller identity; without it the file would be
+ *    owned by 【系统】 instead of the real user;
+ *  - filename  (REQUIRED) — the human-readable download name;
+ *  - title     (REQUIRED) — the document title;
+ *  - content   (REQUIRED) — paragraphs / sheets / slides, at least 1 item.
+ *
+ * Tool descriptions are kept concise but highlighted: REQUIRED fields first,
+ * one-line optionals, a complete JSON calling example and an interaction
+ * contract so the agent always reports progress and the final link to the user
+ * (never leaving the conversation looking stuck).
  */
 
-const COMMON_IMAGE_DOC = [
-  'images (array, optional): embed pictures into the document. Each image item must provide EXACTLY ONE source:',
-  '  - data (string): base64-encoded image bytes, optionally prefixed with "data:image/png;base64," etc. (preferred, most reliable)',
-  '  - url (string): an http(s) link to the image, downloaded by the service at generation time',
-  '  - svg (string): raw SVG XML markup (kept vector in DOCX/PPTX; rasterized to PNG in PDF/XLSX)',
-  '  optional per image: mimeType (needed only when `data` has no data: URL prefix, e.g. image/png, image/svg+xml),',
-  '  width / height (px, omit to auto-size keeping the aspect ratio), align ("left"|"center"|"right"), caption (text under the figure).',
-  '  Supported raster formats: PNG, JPEG, GIF, WebP, BMP.',
-].join('\n');
-
-const COMMON_PARAGRAPHS_DOC = [
-  'paragraphs (array, optional): body content, in order. Each item:',
-  '  { text: string (required), level: 1-6 (heading level; omit/0 = body text), bullet: bool, bold: bool, italic: bool,',
-  '    align: "left"|"center"|"right"|"justify", fontSize: number (points), color: "#RRGGBB" }',
-].join('\n');
-
-const COMMON_TABLES_DOC = [
-  'tables (array, optional): data tables. Each table:',
-  '  { columns: [{ key: string, header: string }] (optional; omit to auto-derive from the first row keys),',
-  '    rows: [{ <columnKey>: string | number | boolean | null }] (required, at least 1) }',
-].join('\n');
-
-const PDF_IMAGE_DOC = [
-  'images (array, optional): embed pictures after the body content. Each image item provides EXACTLY ONE source:',
-  '  - data (string): base64-encoded bytes, optionally a data: URI (preferred)',
-  '  - url (string): http(s) link, downloaded at generation time',
-  '  - svg (string): raw SVG markup (rasterized to PNG for PDF)',
-  '  optional: mimeType, width / height (px), align ("left"|"center"|"right"), caption.',
-  '  PDF supports PNG, JPEG and SVG images.',
+/** Interaction contract embedded in every tool description: the agent must
+ *  announce that generation started before calling, then present the result
+ *  (or the failure reason) immediately after the call returns. */
+const INTERACTION_DOC = [
+  '',
+  '交互契约（务必遵守，避免用户误以为“卡住”）:',
+  '1. 调用本工具【之前】，先用一句话向用户播报进度，例如：“好的，正在为您生成《<title>》…，请稍候（通常需数秒至几十秒）”。',
+  '2. 工具返回后，立即向用户展示结果：【生成成功】文件名、文件大小、下载链接(url)。',
+  '3. 若工具返回错误，把【失败原因】用通俗语言转述给用户（通常是某个必填字段缺失或为空），并指出如何修正后重试。',
+  '4. 全程保持交互与反馈，切勿让调用看起来没有反应。',
 ].join('\n');
 
 const COMMON_RETURN = [
   '',
-  'Returns JSON: { "format", "filename", "url", "size", "mimeType", "createdAt" }.',
-  'Give the user the final "url" (public download link) directly.',
+  '成功返回 JSON: { "format", "filename", "url", "size", "mimeType", "createdAt" }。',
+  '请把 "url"（公开下载链接）连同文件名、大小一起展示给用户，并说明文档已生成完成。',
 ].join('\n');
 
-// Strong, early instruction so the model reliably passes a human-readable file
-// name instead of relying on the (title/random) server-side fallback.
-const FILENAME_RULE = [
+/** 统一返回结构说明（outputSchema，Zod schema），供 MCP 客户端展示返回字段。 */
+const COMMON_OUTPUT_SCHEMA = z.object({
+  format: z.string().describe('文档格式，如 docx/pdf/xlsx/pptx'),
+  filename: z.string().describe('文件名（不含扩展名）'),
+  url: z.string().describe('公开下载链接（展示给用户）'),
+  size: z.number().describe('文件大小（字节）'),
+  mimeType: z.string().describe('MIME 类型'),
+  createdAt: z.string().describe('创建时间（ISO 字符串）'),
+});
+
+/** Common required fields shown at the top of every tool description. */
+const REQUIRED_DOC_HEADER = [
   '',
-  'IMPORTANT — always set "filename":',
-  '- It must be the generated file\'s human-readable download name, WITHOUT file extension, e.g. "Q3经营报告", "发票明细", "2025年度总结".',
-  '- Derive it from the document subject/title and keep it concise (<=60 chars). Use letters/digits/CJK, spaces, "-" or "_".',
-  '- Never omit it and never set a generic value like "文档", "untitled", or "report".',
-  '- Examples: subject "2025年第三季度经营分析" → "filename": "2025年Q3经营分析"; subject "员工培训合同" → "filename": "员工培训合同".',
-  'Only if the user gave no subject at all may you fall back to the title; the system then derives it automatically.',
+  '必填字段（REQUIRED，缺失或为空将被拒绝并返回原因）:',
+  '- username (string): 当前发起生成的用户（SSO 用户名）。文档将归属到该用户而不是【系统】；请使用真实用户标识，不要编造。',
+  '- filename (string): 下载文件名（不含扩展名），简洁可读，如 "Q3经营报告"、"2025年度总结"。',
+  '- title (string): 文档标题。',
 ].join('\n');
 
-const STYLE_TEMPLATE_DOC = [
-  'styleTemplateId (string, optional): uuid of an uploaded file-based style template of the SAME format to inherit its',
-  'theme/colors/fonts/layout (e.g. "inherit the company deck design"). When omitted, the caller\'s own per-format default',
-  'template is used if set; otherwise the platform/system default template is applied (if any).',
-  'username (string, optional): the SSO username of the user who is generating this document. It scopes the generated',
-  'file (only that user can see it in the admin UI) and becomes the document author when `author` is not provided.',
-  'The platform (Dify / MCP gateway) usually sets this automatically.',
-  'filename (string): REQUIRED — see the "IMPORTANT — always set filename" rule above. A safe basename is applied and the',
-  'correct extension (.pptx/.docx/.xlsx/.pdf) is added automatically.',
+/** Common optional fields shared by docx / pdf (concise one-liners). */
+const OPT_TEXT_DOC = [
+  '- author (string): 作者（缺省取 username）。',
+  '- tables (array): 数据表格，每项 { columns:[{key,header}](可选), rows:[{<key>:value}](至少1行) }。',
+  '- images (array): 图片，每张三选一 data(base64)/url/svg，可带 width/height/align/caption，追加在正文后。',
+  '- footer (string): 每页底部页脚文字。',
+  '- styleTemplateId (string): 已上传的同格式样式模板 uuid（可选，继承主题/字体）。',
 ].join('\n');
 
-const PDF_STYLE_TEMPLATE_DOC = [
-  'styleTemplateId (string, optional): accepted for interface compatibility; style templates only affect PPTX / DOCX / XLSX files.',
-  'filename (string): REQUIRED — see the "IMPORTANT — always set filename" rule above. A safe basename is applied and the',
-  'correct extension (.pdf) is added automatically.',
+/** Optional fields specific to the Excel tool. */
+const OPT_SHEETS_DOC = [
+  '- 每个工作表: { name(工作表名), columns:[{key,header}](可选), rows:[{<key>:value}](至少1行), images(可选,固定在表格下方) }。',
+  '- styleTemplateId (string): 已上传的 .xlsx 样式模板 uuid（可选，继承主题/配色）。',
 ].join('\n');
+
+/** Optional fields specific to the PowerPoint tool. */
+const OPT_SLIDES_DOC = [
+  '- 每页内容(slides[]): { title, subtitle, bullets:[string], tables:[{columns?,rows}], images:[...], layout("title"|"title_content"), footer }。',
+  '- author (string): 演示文稿作者（缺省取 username）。',
+  '- styleTemplateId (string): 已上传的 .pptx 样式模板 uuid（可选，继承主题/版式）。',
+].join('\n');
+
+/** Run generation and convert any failure into a readable error result the
+ *  agent can relay to the user. Validation of mandatory fields happens earlier
+ *  (the SDK rejects them with the schema's own messages). */
+async function generateSafe(fn: () => Promise<GeneratedDocument>) {
+  try {
+    return toMcpResult(await fn());
+  } catch (err) {
+    const reason = (err as Error).message;
+    return {
+      isError: true,
+      content: [
+        {
+          type: 'text' as const,
+          text: `文档生成失败 / generation failed — 原因: ${reason}。请向用户说明失败原因，并按要求修正后重试。`,
+        },
+      ],
+    };
+  }
+}
 
 export function createMcpServer(service: DocumentService): McpServer {
   const server = new McpServer({
@@ -89,26 +113,33 @@ export function createMcpServer(service: DocumentService): McpServer {
     {
       title: 'Generate Word (.docx)',
       description: [
-        'Create a Microsoft Word (.docx) document from structured content and return a public download link. Use this for Word reports, 文档/汇报/合同/简历. ',
-        FILENAME_RULE,
+        '生成 Word (.docx) 文档并返回公开下载链接。直接提供一段 Markdown 作为 content 即可，无需构造复杂参数。',
         '',
-        'Input fields:',
-        '- title (string, optional): document title, rendered as a centered large heading.',
-        `- ${COMMON_PARAGRAPHS_DOC}`,
-        `- ${COMMON_TABLES_DOC}`,
-        `- ${COMMON_IMAGE_DOC}`,
-        '- footer (string, optional): text repeated at the bottom of every page.',
-                `- ${STYLE_TEMPLATE_DOC}`,
+        '必填：username、filename、content(Markdown)。可选：title(缺省取 content 首个 # 标题)、author、footer、styleTemplateId。',
         '',
-        'Example:',
-        '{"filename":"Q3经营报告","title":"Q3 经营报告","paragraphs":[{"text":"摘要","level":1},{"text":"本季度收入增长18%","bullet":true},{"text":"成本下降5%","bullet":true}],"tables":[{"columns":[{"key":"m","header":"月份"},{"key":"rev","header":"收入(万元)"}],"rows":[{"m":"7月","rev":120},{"m":"8月","rev":141}]}],"images":[{"data":"data:image/png;base64,....","width":420,"align":"center","caption":"营收变化曲线"}]}',
+        'content 支持：',
+        '- # 一级标题 / ## 二级标题 / ### 三级标题 …',
+        '- - 列表要点',
+        '- **加粗** / *斜体*',
+        '- | 表头1 | 表头2 | 表格（每行一个 | 单元格 |）',
+        '- ![图片说明](图片url 或 data:base64)',
+        '',
+        '示例（content）:',
+        '# Q3 经营报告',
+        '## 摘要',
+        '- 本季度收入增长 18%',
+        '| 月份 | 收入（万元） |',
+        '| 7月 | 120 |',
+        '| 8月 | 141 |',
+        INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: docxSchema,
+      outputSchema: COMMON_OUTPUT_SCHEMA as any,
     },
     async (args: Record<string, unknown>) => {
       const { styleTemplateId, filename, username, ...rest } = args;
-      return toMcpResult(await service.generate('docx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
+      return generateSafe(() => service.generate('docx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 
@@ -117,27 +148,28 @@ export function createMcpServer(service: DocumentService): McpServer {
     {
       title: 'Generate PDF',
       description: [
-        'Create a PDF document from structured content and return a public download link. Use this for printable/高保真 documents (PDF export of reports, invoices, newsletters).',
-        FILENAME_RULE,
+        '生成 PDF 文档并返回公开下载链接。直接提供一段 Markdown 作为 content 即可。',
         '',
-        'Input fields:',
-        '- title (string, optional): document title, rendered as a centered heading.',
-        '- author (string, optional) / subject (string, optional): PDF metadata.',
-        `- ${COMMON_PARAGRAPHS_DOC}`,
-        `- ${COMMON_TABLES_DOC}`,
-        `- ${PDF_IMAGE_DOC}`,
-        '- footer (string, optional): text repeated at the bottom of every page.',
-        `- ${PDF_STYLE_TEMPLATE_DOC}`,
+        '必填：username、filename、content(Markdown)。可选：title(缺省取 content 首个 # 标题)、author、subject、footer、styleTemplateId。',
         '',
-        'Example:',
-        '{"filename":"发票明细","title":"发票明细","paragraphs":[{"text":"订单号 #1042","level":2},{"text":"共3件商品","bullet":true}],"tables":[{"columns":[{"key":"item","header":"商品"},{"key":"price","header":"单价"}],"rows":[{"item":"键盘","price":199},{"item":"鼠标","price":89}]}],"footer":"ai-doc 生成","images":[{"svg":"<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"300\\" height=\\"100\\"><rect width=\\"300\\" height=\\"100\\" fill=\\"#2F5496\\"/></svg>","align":"center"}]}',
+        'content 支持：# 标题、- 列表、**加粗**、*斜体*、| 表头 | 表格 |、![图片说明](图片url或data:)。',
+        '',
+        '示例（content）:',
+        '# 发票明细',
+        '## 汇总',
+        '- 共 3 件商品',
+        '| 商品 | 单价 |',
+        '| 键盘 | 199 |',
+        '| 鼠标 | 89 |',
+        INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: pdfSchema,
+      outputSchema: COMMON_OUTPUT_SCHEMA as any,
     },
     async (args: Record<string, unknown>) => {
       const { styleTemplateId, filename, username, ...rest } = args;
-      return toMcpResult(await service.generate('pdf', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
+      return generateSafe(() => service.generate('pdf', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 
@@ -146,29 +178,30 @@ export function createMcpServer(service: DocumentService): McpServer {
     {
       title: 'Generate Excel (.xlsx)',
       description: [
-        'Create an Excel (.xlsx) workbook with one or more worksheets of tabular data and return a public download link. Use this for spreadsheets, 数据表格/报表/清单.',
-        FILENAME_RULE,
+        '生成 Excel (.xlsx) 工作簿并返回公开下载链接。直接提供一段 Markdown 作为 content。',
         '',
-        'Input fields:',
-        '- title (string, optional): workbook metadata.',
-        '- sheets (array, required, at least 1): worksheets. Each sheet:',
-        '    { name: string (sheet tab name),',
-        '      columns: [{ key, header }] (optional, else derived from first row),',
-        '      rows: [{ <columnKey>: string | number | boolean | null }] (required),',
-        '      images: [image items] (optional, anchored below the table; PNG/JPEG/SVG supported) }',
-        '- images item form (exactly one of): data (base64 or data: URI), url (http(s) link), svg (raw SVG markup);',
-        '  optional width/height in px. SVG is rasterized to PNG.',
-        `- ${STYLE_TEMPLATE_DOC}`,
+        '必填：username、filename、content(Markdown)。可选：title、styleTemplateId。',
         '',
-        'Example:',
-        '{"filename":"2025年销售台账","sheets":[{"name":"销售额","columns":[{"key":"region","header":"区域"},{"key":"sales","header":"销售额"}],"rows":[{"region":"华东","sales":1280.5},{"region":"华南","sales":960.2}],"images":[{"data":"data:image/png;base64,....","width":240}]}]}',
+        '映射规则：每个 `## 表名` 作为一个工作表，其下的 `| 表头 | 单元格 |` 表格即该表数据；无 `##` 时每个表格 = 一个工作表（SheetN）。',
+        '',
+        '示例（content）:',
+        '## 2025 销售台账',
+        '| 区域 | 销售额（万元） |',
+        '| 华东 | 1280.5 |',
+        '| 华南 | 960.2 |',
+        '## 二季度',
+        '| 月份 | 收入 |',
+        '| 4月 | 92 |',
+        '| 5月 | 105 |',
+        INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: xlsxSchema,
+      outputSchema: COMMON_OUTPUT_SCHEMA as any,
     },
     async (args: Record<string, unknown>) => {
       const { styleTemplateId, filename, username, ...rest } = args;
-      return toMcpResult(await service.generate('xlsx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
+      return generateSafe(() => service.generate('xlsx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 
@@ -177,32 +210,29 @@ export function createMcpServer(service: DocumentService): McpServer {
     {
       title: 'Generate PowerPoint (.pptx)',
       description: [
-        'Create a PowerPoint (.pptx) deck from structured content and return a public download link. A title slide is generated from the top-level title; each slide in `slides` becomes a content slide.',
-        FILENAME_RULE,
+        '生成 PowerPoint (.pptx) 演示文稿并返回公开下载链接。直接提供一段 Markdown 作为 content。',
         '',
-        'Input fields:',
-        '- title (string, required): presentation title (also the title slide).',
-        '- author (string, optional): presentation author.',
-        '- slides (array, required, at least 1): each slide:',
-        '    { title: string (optional), subtitle: string (optional),',
-        '      bullets: [string] (optional, bullet points),',
-        '      tables: [ { columns?, rows } ] (optional, rendered below the title/text; one or more tables per slide),',
-        '      images: [image items] (optional, rendered in the lower part of the slide),',
-        '      layout: "title" | "title_content" (optional, default title_content),',
-        '      footer: string (optional, footnote at the bottom) }',
-        '- image item form (exactly one of): data (base64 or data: URI), url (http(s) link), svg (raw SVG, rasterized to PNG for broad compatibility);',
-        '  optional width/height in px, align ("left"|"center"|"right"), caption. GIF/WebP also accepted.',
-        `- ${STYLE_TEMPLATE_DOC}`,
+        '必填：username、filename、content(Markdown)。可选：title(缺省取 content 首个 # 标题)、author、styleTemplateId。',
         '',
-        'Example:',
-        '{"filename":"渠道汇报","title":"渠道汇报","slides":[{"title":"各渠道表现","bullets":["线上销售增长25%","线下持平"],"tables":[{"columns":[{"key":"ch","header":"渠道"},{"key":"growth","header":"增长"}],"rows":[{"ch":"线上","growth":"25%"},{"ch":"线下","growth":"0%"}]}]},{"title":"数据可视化","images":[{"svg":"<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"400\\" height=\\"200\\"><circle cx=\\"100\\" cy=\\"100\\" r=\\"80\\" fill=\\"#E8A33D\\"/></svg>","align":"center"}]}]}',
+        '映射规则：每个 `## 页标题` 表示一页幻灯片，其下的 `- 要点` 为内容列表、`| 表格 |` 为表格页。',
+        '',
+        '示例（content）:',
+        '# 渠道汇报',
+        '## 各渠道表现',
+        '- 线上销售增长 25%',
+        '- 线下持平',
+        '| 渠道 | 增幅 |',
+        '| 线上 | +25% |',
+        '| 线下 | 0% |',
+        INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
       inputSchema: pptxSchema,
+      outputSchema: COMMON_OUTPUT_SCHEMA as any,
     },
     async (args: Record<string, unknown>) => {
       const { styleTemplateId, filename, username, ...rest } = args;
-      return toMcpResult(await service.generate('pptx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
+      return generateSafe(() => service.generate('pptx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 

@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import { fileURLToPath } from 'node:url';
 import type { ImageItem, ParagraphItem, PdfInput } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
+import { markdownToPdf } from './markdown.js';
 import { computeSize, resolveImage, svgToPng } from './images.js';
 
 /**
@@ -109,7 +110,13 @@ export const pdfGenerator: Generator = {
   format: 'pdf',
   mimeType: 'application/pdf',
   extension: 'pdf',
-  generate(input: PdfInput, _ctx?: GenerateContext): Promise<Buffer> {
+  generate(input: any, _ctx?: GenerateContext): Promise<Buffer> {
+    const pdfInput = markdownToPdf(String(input?.content || ''));
+    pdfInput.title = (input.title as string) || pdfInput.title;
+    pdfInput.author = (input.author as string) || pdfInput.author;
+    pdfInput.subject = (input.subject as string) || pdfInput.subject;
+    pdfInput.footer = (input.footer as string) || pdfInput.footer;
+    input = pdfInput;
     return new Promise((resolve, reject) => {
       const info: Record<string, string | Date> = { Creator: 'ai-doc', CreationDate: new Date(), ModDate: new Date() };
       if (input.title) info.Title = input.title;
@@ -170,8 +177,8 @@ export const pdfGenerator: Generator = {
           doc.y = y + rowH;
         };
 
-        drawRow(cols.map((c) => c.header), true);
-        for (const row of t.rows) drawRow(cols.map((c) => String(row[c.key] ?? '')), false);
+        drawRow(cols.map((c: { header: string }) => c.header), true);
+        for (const row of t.rows) drawRow(cols.map((c: { key: string }) => String(row[c.key] ?? '')), false);
         doc.moveDown(0.6);
       }
 

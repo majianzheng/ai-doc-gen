@@ -128,6 +128,14 @@ Dify 原生支持 MCP。在 **工具 → MCP → 添加 MCP 服务** 中选择 *
 - 服务地址:开启服务后填写 `http://<你的服务地址>:9000/mcp`
 - 保存后即会出现 4 个工具:`generate_word_docx`、`generate_pdf`、`generate_excel_xlsx`、`generate_powerpoint_pptx`
 
+> **必填字段(缺失或为空会被拒绝并返回原因)**:
+> - `username`:当前发起生成的用户(SSO 用户名),用于把文档归属到该用户而不是【系统】;
+> - `filename`:下载文件名(不含扩展名);
+> - `title`:文档标题;
+> - 内容:`paragraphs`(docx/pdf) / `sheets`(xlsx) / `slides`(pptx),至少 1 项。
+>
+> Agent 应在调用前向用户播报“正在生成…”,返回后立即展示下载链接,避免看起来“卡住”。
+
 ### 2. Claude Desktop / 其他 stdio Agent
 
 在 Claude 配置中注册:
@@ -151,8 +159,8 @@ Dify 原生支持 MCP。在 **工具 → MCP → 添加 MCP 服务** 中选择 *
 ```bash
 curl -X POST http://localhost:9000/api/documents/pdf \
   -H "Content-Type: application/json" \
-  -d '{"title": "周报", "paragraphs": [{"text": "本周总结", "level": 1}, {"text": "完成 X 项任务", "bullet": true}]}'
-# => { "url": "https://...", "filename": "...", "size": ..., "format": "pdf" }
+  -d '{"username": "zhangsan", "filename": "周报", "title": "周报", "paragraphs": [{"text": "本周总结", "level": 1}, {"text": "完成 X 项任务", "bullet": true}]}'
+# => { "url": "https://...", "filename": "周报.pdf", "size": ..., "format": "pdf" }
 ```
 
 ## Dify 插件包
@@ -168,6 +176,9 @@ dify plugin package ./    # 打包生成 .difypkg
 ```
 
 插件包含 4 个工具,使用前在每个工具里填写「Service Base URL」(ai-doc 服务地址,如 `http://localhost:9000`)。
+
+> 插件的每个工具都要求 LLM 提供必填的 `username`(当前用户)、`filename`(下载文件名,不含扩展名)、`title` 以及内容
+> (`paragraphs` / `sheets` / `slides`)。缺失或为空时 REST 服务将返回 422 及具体原因。
 
 ## 添加新的文档格式
 

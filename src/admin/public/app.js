@@ -28,9 +28,65 @@ const I18N = {
     'page.styles': '样式模板',
     'files.title': '生成的文档',
     'files.subtitle': '在页面上直接预览或下载已生成的文档',
-    'files.searchPlaceholder': '按文件名 / 格式搜索…',
+    'files.searchPlaceholder': '按文件名 / 格式 / 所属用户搜索…',
     'files.refresh': '刷新',
+    'files.allOwners': '全部用户',
+    'files.ownerFilter': '按所属用户检索',
     'files.empty': '暂无生成文件',
+    'files.prev': '上一页',
+    'files.next': '下一页',
+    'files.pageInfo': '第 {page} / {pages} 页',
+    'files.count': '共 {total} 条',
+    'files.action.owner': '分配',
+    'files.transfer.title': '分配文件归属',
+    'files.transfer.select': '选择用户',
+    'files.transfer.optional': '或输入新的用户名(无需注册/SSO 登录过)',
+    'files.transfer.customPh': '输入用户名',
+    'files.transfer.assign': '分配',
+    'files.transfer.success': '已分配到: {owner}',
+    'files.transfer.failed': '分配失败: {msg}',
+    'files.ownerSelectNone': '选择用户…',
+    'files.transfer.label': '将文件分配给用户',
+    'files.transfer.needOwner': '请选择用户或输入新用户名',
+    'audit.title': '审计日志',
+    'audit.subtitle': '记录登录、文件、模板、用户与 SSO 等操作,便于追踪',
+    'audit.search': '搜索详情/目标…',
+    'audit.actor': '按操作人…',
+    'audit.refresh': '刷新',
+    'audit.clear': '清空日志',
+    'audit.allActions': '全部操作类型',
+    'audit.col.time': '时间',
+    'audit.col.actor': '操作人',
+    'audit.col.action': '操作类型',
+    'audit.col.target': '目标',
+    'audit.col.detail': '详情',
+    'audit.empty': '暂无审计记录',
+    'audit.pageInfo': '第 {page} / {pages} 页',
+    'audit.loadFailed': '加载审计日志失败: {msg}',
+    'audit.clearConfirm': '确定清空全部审计日志吗?此操作不可恢复。',
+    'audit.cleared': '已清空审计日志',
+    'audit.clearFailed': '清空失败: {msg}',
+    'audit.roleSystem': '系统',
+    'audit.act.login': '登录',
+    'audit.act.logout': '退出登录',
+    'audit.act.auth.password': '修改密码',
+    'audit.act.sso.update': 'SSO 配置修改',
+    'audit.act.file.generate': '生成文件',
+    'audit.act.file.delete': '删除文件',
+    'audit.act.file.transfer': '转移文件归属',
+    'audit.act.file.download': '下载文件',
+    'audit.act.template.create': '创建模板',
+    'audit.act.template.update': '更新模板',
+    'audit.act.template.delete': '删除模板',
+    'audit.act.styletemplate.upload': '上传样式模板',
+    'audit.act.styletemplate.delete': '删除样式模板',
+    'audit.act.styletemplate.default': '设置默认样式模板',
+    'audit.act.user.create': '创建用户',
+    'audit.act.user.delete': '删除用户',
+    'audit.act.user.role': '变更用户角色',
+    'audit.act.user.rename': '修改用户昵称',
+    'audit.act.user.password': '重置用户密码',
+    'audit.act.audit.clear': '清空审计日志',
     'files.col.name': '文件名',
     'files.col.format': '格式',
     'files.col.size': '大小',
@@ -146,8 +202,10 @@ const I18N = {
     'login.foot': '当前用户已登录',
     'nav.users': '用户管理',
     'nav.sso': 'SSO 登录',
+    'nav.audit': '审计日志',
     'page.users': '用户管理',
     'page.sso': 'SSO 登录',
+    'page.audit': '审计日志',
     'files.owner': '归属',
     'files.ownerSystem': '系统',
     'files.ownerMe': '我',
@@ -257,9 +315,65 @@ const I18N = {
     'page.styles': 'Style Templates',
     'files.title': 'Generated Documents',
     'files.subtitle': 'Preview or download generated documents right in the page',
-    'files.searchPlaceholder': 'Search by name / format…',
+    'files.searchPlaceholder': 'Search by name / format / owner…',
     'files.refresh': 'Refresh',
+    'files.allOwners': 'All users',
+    'files.ownerFilter': 'Filter by owner',
     'files.empty': 'No generated files yet',
+    'files.prev': 'Previous',
+    'files.next': 'Next',
+    'files.pageInfo': 'Page {page} / {pages}',
+    'files.count': '{total} items',
+    'files.action.owner': 'Transfer',
+    'files.transfer.title': 'Transfer File Ownership',
+    'files.transfer.select': 'Select user',
+    'files.transfer.optional': 'Or type a new username (no registration / SSO login needed)',
+    'files.transfer.customPh': 'Enter username',
+    'files.transfer.assign': 'Assign',
+    'files.transfer.success': 'Transferred to: {owner}',
+    'files.transfer.failed': 'Transfer failed: {msg}',
+    'files.ownerSelectNone': 'Select a user…',
+    'files.transfer.label': 'Transfer file to a user',
+    'files.transfer.needOwner': 'Select a user or enter a new username',
+    'audit.title': 'Audit Log',
+    'audit.subtitle': 'Track logins, files, templates, users and SSO operations',
+    'audit.search': 'Search detail / target…',
+    'audit.actor': 'By actor…',
+    'audit.refresh': 'Refresh',
+    'audit.clear': 'Clear log',
+    'audit.allActions': 'All actions',
+    'audit.col.time': 'Time',
+    'audit.col.actor': 'Actor',
+    'audit.col.action': 'Action',
+    'audit.col.target': 'Target',
+    'audit.col.detail': 'Detail',
+    'audit.empty': 'No audit records yet',
+    'audit.pageInfo': 'Page {page} / {pages}',
+    'audit.loadFailed': 'Failed to load audit log: {msg}',
+    'audit.clearConfirm': 'Clear ALL audit logs? This cannot be undone.',
+    'audit.cleared': 'Audit log cleared',
+    'audit.clearFailed': 'Clear failed: {msg}',
+    'audit.roleSystem': 'System',
+    'audit.act.login': 'Login',
+    'audit.act.logout': 'Logout',
+    'audit.act.auth.password': 'Change password',
+    'audit.act.sso.update': 'SSO config update',
+    'audit.act.file.generate': 'Generate file',
+    'audit.act.file.delete': 'Delete file',
+    'audit.act.file.transfer': 'Transfer file',
+    'audit.act.file.download': 'Download file',
+    'audit.act.template.create': 'Create template',
+    'audit.act.template.update': 'Update template',
+    'audit.act.template.delete': 'Delete template',
+    'audit.act.styletemplate.upload': 'Upload style template',
+    'audit.act.styletemplate.delete': 'Delete style template',
+    'audit.act.styletemplate.default': 'Set default style template',
+    'audit.act.user.create': 'Create user',
+    'audit.act.user.delete': 'Delete user',
+    'audit.act.user.role': 'Change user role',
+    'audit.act.user.rename': 'Rename user',
+    'audit.act.user.password': 'Reset user password',
+    'audit.act.audit.clear': 'Clear audit log',
     'files.col.name': 'File Name',
     'files.col.format': 'Format',
     'files.col.size': 'Size',
@@ -375,8 +489,10 @@ const I18N = {
     'login.foot': 'A user is already signed in',
     'nav.users': 'Users',
     'nav.sso': 'SSO Login',
+    'nav.audit': 'Audit Log',
     'page.users': 'Users',
     'page.sso': 'SSO Login',
+    'page.audit': 'Audit Log',
     'files.owner': 'Owner',
     'files.ownerSystem': 'System',
     'files.ownerMe': 'Me',
@@ -506,6 +622,9 @@ mqDark.addEventListener('change', () => { if (getThemePref() === 'system') apply
 const state = {
   meta: null,
   files: [],
+  filesPage: { page: 1, limit: 20, total: 0, pages: 1, owners: [] },
+  audit: [],
+  auditPage: { page: 1, limit: 20, total: 0, pages: 1, actions: [] },
   templates: [],
   styleTemplates: [],
   styleDefaults: {},
@@ -584,7 +703,7 @@ const EXAMPLES = {
   },
 };
 
-const PAGES = { files: 'page.files', templates: 'page.templates', styles: 'page.styles', users: 'page.users', sso: 'page.sso' };
+const PAGES = { files: 'page.files', templates: 'page.templates', styles: 'page.styles', users: 'page.users', sso: 'page.sso', audit: 'page.audit' };
 
 function fmtBytes(n) {
   if (n == null) return '-';
@@ -1017,7 +1136,7 @@ function applyI18nAll() {
    Tabs / navigation
    ============================================================ */
 function switchTab(tab) {
-  if ((tab === 'users' || tab === 'sso') && !isAdminUser()) tab = 'files';
+  if ((tab === 'users' || tab === 'sso' || tab === 'audit') && !isAdminUser()) tab = 'files';
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.remove('active'));
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
   const item = document.querySelector('.nav-item[data-tab="' + tab + '"]');
@@ -1030,6 +1149,7 @@ function switchTab(tab) {
   if (tab === 'styles') refreshStyleTemplates();
   if (tab === 'users') refreshUsers();
   if (tab === 'sso') { refreshSsoStatus(); loadSsoConfig(); }
+  if (tab === 'audit') refreshAudit();
 }
 
 /* ============================================================
@@ -1061,20 +1181,41 @@ async function loadMeta() {
    ============================================================ */
 async function refreshFiles() {
   try {
-    state.files = await api('/api/files');
+    const data = await api(filesQuery());
+    state.files = data.items || [];
+    state.filesPage.page = data.page || 1;
+    state.filesPage.limit = data.limit || 20;
+    state.filesPage.total = data.total || 0;
+    state.filesPage.pages = data.pages || 1;
+    state.filesPage.owners = data.owners || [];
+    // The current page may be emptied after a delete / filter change: jump to the last page.
+    if (state.files.length === 0 && state.filesPage.page > 1 && state.filesPage.total > 0 && state.filesPage.pages < state.filesPage.page) {
+      state.filesPage.page = state.filesPage.pages;
+      return refreshFiles();
+    }
     renderFiles();
+    renderFilePagination();
+    renderFileOwners();
   } catch (err) {
     toast(t('files.loadFailed', { msg: err.message }), 'err');
   }
 }
 
+function filesQuery() {
+  const p = state.filesPage;
+  const params = new URLSearchParams({ page: String(p.page), limit: String(p.limit) });
+  const q = ($('#fileSearch').value || '').trim();
+  const owner = $('#fileOwner') ? $('#fileOwner').value : '';
+  if (q) params.set('q', q);
+  if (owner) params.set('owner', owner);
+  return '/api/files?' + params.toString();
+}
+
 function renderFiles() {
   const rows = $('#fileRows');
-  const q = ($('#fileSearch').value || '').trim().toLowerCase();
-  const list = q
-    ? state.files.filter((f) => ((f.name || '') + ' ' + (f.format || '')).toLowerCase().includes(q))
-    : state.files;
+  const list = state.files;
   $('#fileEmpty').classList.toggle('hidden', list.length > 0);
+  const admin = isAdminUser();
   rows.innerHTML = list.map((f) => {
     const encoded = b64urlEncodeUTF8(f.key);
     const owner = f.owner === 'system'
@@ -1082,17 +1223,62 @@ function renderFiles() {
       : (f.owner === (state.user && state.user.username)
         ? '<span class="badge-owner mine">' + escapeHtml(t('files.ownerMe')) + '</span>'
         : '<span class="badge-owner">' + escapeHtml(f.owner || '') + '</span>');
+    const actions = ''
+      + '<button class="icon-btn" data-act="preview" data-key="' + encoded + '">' + t('files.action.preview') + '</button>'
+      + '<button class="icon-btn" data-act="download" data-key="' + encoded + '">' + t('files.action.download') + '</button>'
+      + (admin ? '<button class="icon-btn" data-act="owner" data-key="' + encoded + '" title="' + escapeAttr(t('files.transfer.title')) + '">' + t('files.action.owner') + '</button>' : '')
+      + '<button class="icon-btn danger" data-act="delete" data-key="' + encoded + '">' + t('files.action.delete') + '</button>';
     return '<tr>'
       + '<td title="' + escapeAttr(f.key) + '">' + escapeHtml(f.name) + ' ' + owner + '</td>'
       + '<td>' + formatBadge(f.format) + '</td>'
       + '<td>' + fmtBytes(f.size) + '</td>'
       + '<td class="muted">' + fmtTime(f.lastModified) + '</td>'
-      + '<td class="td-right">'
-      + '<button class="icon-btn" data-act="preview" data-key="' + encoded + '">' + t('files.action.preview') + '</button>'
-      + '<button class="icon-btn" data-act="download" data-key="' + encoded + '">' + t('files.action.download') + '</button>'
-      + '<button class="icon-btn danger" data-act="delete" data-key="' + encoded + '">' + t('files.action.delete') + '</button>'
-      + '</td></tr>';
+      + '<td class="td-right">' + actions + '</td></tr>';
   }).join('');
+}
+
+function renderFilePagination() {
+  const p = state.filesPage;
+  const countEl = $('#fileCount');
+  const infoEl = $('#filePageInfo');
+  const prevEl = $('#filePrev');
+  const nextEl = $('#fileNext');
+  const footer = $('#filePagination');
+  if (!footer) return;
+  footer.classList.toggle('hidden', p.total === 0);
+  if (countEl) countEl.textContent = t('files.count', { total: p.total });
+  if (infoEl) infoEl.textContent = t('files.pageInfo', { page: p.page, pages: p.pages });
+  if (prevEl) prevEl.disabled = p.page <= 1;
+  if (nextEl) nextEl.disabled = p.page >= p.pages;
+}
+
+function renderFileOwners() {
+  const sel = $('#fileOwner');
+  if (!sel) return;
+  const cur = sel.value;
+  const owners = state.filesPage.owners || [];
+  const opts = ['<option value="">' + escapeHtml(t('files.allOwners')) + '</option>']
+    + owners.map((o) => '<option value="' + escapeAttr(o) + '">' + escapeHtml(o === 'system' ? t('files.ownerSystem') : o) + '</option>').join('');
+  sel.innerHTML = opts;
+  if (cur && owners.some((o) => o === cur)) sel.value = cur;
+  else sel.value = '';
+}
+
+function gotoFilesPage(page) {
+  const p = state.filesPage;
+  const target = Math.min(Math.max(1, page), Math.max(1, p.pages));
+  if (target === p.page) return;
+  p.page = target;
+  refreshFiles();
+}
+
+let fileSearchTimer = null;
+function onFileSearch() {
+  clearTimeout(fileSearchTimer);
+  fileSearchTimer = setTimeout(() => {
+    state.filesPage.page = 1;
+    refreshFiles();
+  }, 250);
 }
 
 function fileClickHandler(e) {
@@ -1103,7 +1289,172 @@ function fileClickHandler(e) {
   if (!file) return;
   if (btn.dataset.act === 'preview') openPreview(file);
   if (btn.dataset.act === 'download') window.open(file.downloadUrl, '_blank');
+  if (btn.dataset.act === 'owner') openTransferModal(file);
   if (btn.dataset.act === 'delete') deleteFile(file);
+}
+
+/* ---- transfer file ownership (admin) ---- */
+state.transferFile = null;
+async function openTransferModal(file) {
+  state.transferFile = file;
+  if (state.users.length === 0 && isAdminUser()) {
+    try { await refreshUsers(); } catch { /* options still work below */ }
+  }
+  const sel = $('#transferOwner');
+  sel.innerHTML = '<option value="">' + escapeHtml(t('files.ownerSelectNone')) + '</option>'
+    + '<option value="system">' + escapeHtml(t('files.ownerSystem')) + '</option>'
+    + (state.users || []).map((u) => '<option value="' + escapeAttr(u.username) + '">' + escapeHtml(u.username) + '</option>').join('');
+  $('#transferOwner').value = '';
+  $('#transferOwnerCustom').value = '';
+  $('#transferError').classList.add('hidden');
+  $('#transferFileLabel').textContent = t('files.transfer.label') + ' — ' + (file.name || '') + ' ('
+    + (file.owner === 'system' ? t('files.ownerSystem') : file.owner) + ')';
+  $('#transferModal').classList.remove('hidden');
+}
+
+function closeTransferModal() {
+  state.transferFile = null;
+  $('#transferModal').classList.add('hidden');
+}
+
+async function confirmTransfer() {
+  const file = state.transferFile;
+  if (!file) return;
+  const selectOwner = $('#transferOwner').value;
+  const customOwner = ($('#transferOwnerCustom').value || '').trim();
+  const owner = selectOwner === 'system' ? 'system' : (selectOwner || customOwner);
+  const err = $('#transferError');
+  if (!owner) {
+    err.textContent = t('files.transfer.needOwner');
+    err.classList.remove('hidden');
+    return;
+  }
+  try {
+    await api('/api/files/transfer', { method: 'POST', body: { key: file.key, owner } });
+    toast(t('files.transfer.success', { owner: owner === 'system' ? t('files.ownerSystem') : owner }), 'ok');
+    closeTransferModal();
+    refreshFiles();
+  } catch (err2) {
+    toast(t('files.transfer.failed', { msg: err2.message }), 'err');
+    err.textContent = err2.message;
+    err.classList.remove('hidden');
+  }
+}
+
+/* ============================================================
+   Audit log (admin-only)
+   ============================================================ */
+function auditQuery() {
+  const p = state.auditPage;
+  const params = new URLSearchParams({ page: String(p.page), limit: String(p.limit) });
+  const actor = ($('#auditActor').value || '').trim();
+  const action = $('#auditAction') ? $('#auditAction').value : '';
+  const q = ($('#auditSearch').value || '').trim();
+  if (actor) params.set('actor', actor);
+  if (action) params.set('action', action);
+  if (q) params.set('q', q);
+  return '/api/audit?' + params.toString();
+}
+
+async function refreshAudit() {
+  try {
+    const data = await api(auditQuery());
+    state.audit = data.items || [];
+    state.auditPage.page = data.page || 1;
+    state.auditPage.limit = data.limit || 20;
+    state.auditPage.total = data.total || 0;
+    state.auditPage.pages = data.pages || 1;
+    state.auditPage.actions = data.actions || [];
+    if (state.audit.length === 0 && state.auditPage.page > 1 && state.auditPage.total > 0) {
+      state.auditPage.page = state.auditPage.pages;
+      return refreshAudit();
+    }
+    renderAudit();
+    renderAuditPagination();
+    renderAuditActions();
+  } catch (err) {
+    toast(t('audit.loadFailed', { msg: err.message }), 'err');
+  }
+}
+
+function auditActionLabel(action) {
+  const key = 'audit.act.' + action;
+  return t(key) === key ? action : t(key);
+}
+
+function renderAudit() {
+  const rows = $('#auditRows');
+  const list = state.audit;
+  $('#auditEmpty').classList.toggle('hidden', list.length > 0);
+  rows.innerHTML = list.map((r) => {
+    const role = r.role === 'admin'
+      ? '<span class="badge-role admin">' + escapeHtml(t('users.role.admin')) + '</span>'
+      : (r.role === 'system'
+        ? '<span class="badge-owner system">' + escapeHtml(t('audit.roleSystem')) + '</span>'
+        : '');
+    return '<tr>'
+      + '<td class="muted nowrap">' + fmtTime(r.time) + '</td>'
+      + '<td>' + escapeHtml(r.actor || '-') + ' ' + role + '</td>'
+      + '<td><span class="audit-action">' + escapeHtml(auditActionLabel(r.action)) + '</span></td>'
+      + '<td class="muted" style="word-break:break-all">' + escapeHtml(r.target || '-') + '</td>'
+      + '<td class="muted" style="word-break:break-all">' + escapeHtml(r.detail || '') + (r.ip ? '<span class="audit-ip">' + escapeHtml(r.ip) + '</span>' : '') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function renderAuditPagination() {
+  const p = state.auditPage;
+  const footer = $('#auditPagination');
+  if (!footer) return;
+  footer.classList.toggle('hidden', p.total === 0);
+  const countEl = $('#auditCount');
+  const infoEl = $('#auditPageInfo');
+  const prevEl = $('#auditPrev');
+  const nextEl = $('#auditNext');
+  if (countEl) countEl.textContent = t('files.count', { total: p.total });
+  if (infoEl) infoEl.textContent = t('audit.pageInfo', { page: p.page, pages: p.pages });
+  if (prevEl) prevEl.disabled = p.page <= 1;
+  if (nextEl) nextEl.disabled = p.page >= p.pages;
+}
+
+function renderAuditActions() {
+  const sel = $('#auditAction');
+  if (!sel) return;
+  const cur = sel.value;
+  const actions = state.auditPage.actions || [];
+  sel.innerHTML = '<option value="">' + escapeHtml(t('audit.allActions')) + '</option>'
+    + actions.map((a) => '<option value="' + escapeAttr(a) + '">' + escapeHtml(auditActionLabel(a)) + '</option>').join('');
+  if (cur && actions.indexOf(cur) !== -1) sel.value = cur;
+  else sel.value = '';
+}
+
+function gotoAuditPage(page) {
+  const p = state.auditPage;
+  const target = Math.min(Math.max(1, page), Math.max(1, p.pages));
+  if (target === p.page) return;
+  p.page = target;
+  refreshAudit();
+}
+
+let auditFilterTimer = null;
+function onAuditFilter() {
+  clearTimeout(auditFilterTimer);
+  auditFilterTimer = setTimeout(() => {
+    state.auditPage.page = 1;
+    refreshAudit();
+  }, 250);
+}
+
+async function clearAudit() {
+  if (!window.confirm(t('audit.clearConfirm'))) return;
+  try {
+    await api('/api/audit', { method: 'DELETE' });
+    toast(t('audit.cleared'), 'ok');
+    state.auditPage.page = 1;
+    refreshAudit();
+  } catch (err) {
+    toast(t('audit.clearFailed', { msg: err.message }), 'err');
+  }
 }
 
 async function deleteFile(file) {
@@ -1699,8 +2050,23 @@ function bindEvents() {
   });
 
   $('#fileRefresh').addEventListener('click', refreshFiles);
-  $('#fileSearch').addEventListener('input', renderFiles);
+  $('#fileSearch').addEventListener('input', onFileSearch);
+  $('#fileOwner').addEventListener('change', () => { state.filesPage.page = 1; refreshFiles(); });
+  $('#filePrev').addEventListener('click', () => gotoFilesPage(state.filesPage.page - 1));
+  $('#fileNext').addEventListener('click', () => gotoFilesPage(state.filesPage.page + 1));
   $('#fileTable').addEventListener('click', fileClickHandler);
+  $('#transferClose').addEventListener('click', closeTransferModal);
+  $('#transferSave').addEventListener('click', confirmTransfer);
+  $('#transferModal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeTransferModal();
+  });
+  $('#auditRefresh').addEventListener('click', refreshAudit);
+  $('#auditSearch').addEventListener('input', onAuditFilter);
+  $('#auditActor').addEventListener('input', onAuditFilter);
+  $('#auditAction').addEventListener('change', () => { state.auditPage.page = 1; refreshAudit(); });
+  $('#auditPrev').addEventListener('click', () => gotoAuditPage(state.auditPage.page - 1));
+  $('#auditNext').addEventListener('click', () => gotoAuditPage(state.auditPage.page + 1));
+  $('#auditClear').addEventListener('click', clearAudit);
 
   $('#tplNew').addEventListener('click', newTemplate);
   $('#tplList').addEventListener('click', (e) => {

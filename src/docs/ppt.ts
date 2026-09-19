@@ -3,6 +3,7 @@
 import PptxGenJS from 'pptxgenjs';
 import type { ImageItem, PptxInput, SlideData, TableData } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
+import { markdownToPptx } from './markdown.js';
 import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
 import { renderPptxFromTemplate } from './pptTemplate.js';
 
@@ -16,7 +17,11 @@ export const pptxGenerator: Generator = {
   format: 'pptx',
   mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   extension: 'pptx',
-  async generate(input: PptxInput, ctx?: GenerateContext): Promise<Buffer> {
+  async generate(input: any, ctx?: GenerateContext): Promise<Buffer> {
+    const p = markdownToPptx(String(input?.content || ''));
+    p.title = (input.title as string) || p.title;
+    p.author = (input.author as string) || p.author;
+    input = p;
     // A style template is applied by rendering the deck natively on the
     // template package (placeholder shapes inherit the template's layouts).
     if (ctx?.styleTemplate) {

@@ -4,6 +4,12 @@ import { getGenerator } from './docs/index.js';
 import type { Storage } from './storage/storage.js';
 import type { StyleTemplateStore } from './admin/styleTemplates.js';
 
+/** Minimal audit sink so generation can be recorded without coupling core to
+ *  the admin audit store (duck-typed by AuditLogStore). */
+export interface AuditSink {
+  record(input: { actor?: string; role?: string; action: string; target?: string; detail?: string; ip?: string }): void;
+}
+
 /**
  * Turn a user-supplied requested file name into a safe storage basename:
  * - strips directory components (no path traversal),
@@ -48,12 +54,13 @@ export class DocumentService {
     private readonly storage: Storage,
     private readonly options: { basePath?: string } = {},
     private readonly styleTemplates?: StyleTemplateStore,
+    private readonly audit?: AuditSink,
   ) {}
 
   async generate<F extends DocFormat>(
     format: F,
     rawInput: DocInputs[F],
-    opts: { styleTemplateId?: string; filename?: string; owner?: string } = {},
+    opts: { styleTemplateId?: string; filename?: string; owner?: string; role?: string } = {},
   ): Promise<GeneratedDocument> {
     const generator = getGenerator(format);
 
@@ -103,6 +110,14 @@ export class DocumentService {
     const stored = await this.storage.put(buffer, {
       key: keyCleaned,
       mimeType: generator.mimeType,
+    });
+
+    this.audit?.record({
+      action: 'file.generate',
+      actor: owner,
+      role: opts.role ?? (owner ? 'user' : 'system'),
+      target: keyCleaned,
+      detail: `format=${format} filename=${fileName}`,
     });
 
     return {
