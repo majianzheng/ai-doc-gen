@@ -1,5 +1,6 @@
 import {
   AlignmentType,
+  BorderStyle,
   Document,
   Footer,
   HeadingLevel,
@@ -10,6 +11,7 @@ import {
   Table,
   TableCell,
   TableRow,
+  TableOfContents,
   TextRun,
   WidthType,
   type IParagraphOptions,
@@ -19,6 +21,54 @@ import type { DocxInput, ImageItem, ParagraphItem, TableData } from './types.js'
 import type { Generator, GenerateContext } from './generator.js';
 import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
 import { markdownToDocx } from './markdown.js';
+
+/**
+ * 内置的中文排版默认样式（无外部模板时的兜底观感）。
+ * - 正文：宋体 12pt、首行缩进 2 字符、1.5 倍行距、两端对齐
+ * - 标题：黑体 + 逐级递减字号/颜色层级
+ * - 标题段落写入 outlineLvl，供 Word 导航窗格/目录（TableOfContents）识别
+ * 说明：若应用了外部样式模板（applyStyleTemplate 覆盖 styles.xml），本默认值不生效；
+ * 因此模板应用时会做样式 id 映射/补全，确保标题不被退回正文。
+ */
+const DEFAULT_DOCX_STYLES: ConstructorParameters<typeof Document>[0]['styles'] = {
+  default: {
+    document: {
+      run: { font: '宋体', size: 24 },
+      paragraph: {
+        spacing: { line: 360 },
+        indent: { firstLine: 480 },
+      },
+    },
+    title: {
+      run: { font: '黑体', size: 40, bold: true, color: '000000' },
+      paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 240, after: 480 } },
+    },
+    heading1: {
+      run: { font: '黑体', size: 32, bold: true, color: '1F4E79' },
+      paragraph: { spacing: { before: 480, after: 240 } },
+    },
+    heading2: {
+      run: { font: '黑体', size: 28, bold: true, color: '2E5A88' },
+      paragraph: { spacing: { before: 400, after: 200 } },
+    },
+    heading3: {
+      run: { font: '黑体', size: 24, bold: true, color: '44618A' },
+      paragraph: { spacing: { before: 320, after: 160 } },
+    },
+    heading4: {
+      run: { font: '黑体', size: 22, bold: true, color: '44618A' },
+      paragraph: { spacing: { before: 240, after: 120 } },
+    },
+    heading5: {
+      run: { font: '黑体', size: 21, bold: true, color: '555555' },
+      paragraph: { spacing: { before: 200, after: 100 } },
+    },
+    heading6: {
+      run: { font: '黑体', size: 21, bold: true, color: '666666' },
+      paragraph: { spacing: { before: 200, after: 100 } },
+    },
+  },
+};
 
 function docxLevel(level: number | undefined): string | undefined {
   if (!level || level < 1) return undefined;
@@ -112,10 +162,14 @@ async function imageToDocxParagraphs(img: ImageItem): Promise<Paragraph[]> {
 
 function tableToDocx(t: TableData): Table {
   const cols = t.columns ?? Object.keys(t.rows[0] ?? {}).map((k) => ({ key: k, header: k }));
+  // 统一的三线式/网格边框 + 表头底色，避免默认的"无边框、无底纹"原始观感
+  const edges = { style: BorderStyle.SINGLE, size: 6, color: '333333' } as const;
+  const inside = { style: BorderStyle.SINGLE, size: 4, color: '999999' } as const;
   const headerRow = new TableRow({
     tableHeader: true,
     children: cols.map((c) => new TableCell({
-      children: [new Paragraph({ children: [new TextRun({ text: c.header, bold: true })] })],
+      shading: { type: 'clear' as any, fill: 'D9E2F3' },
+      children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: c.header, bold: true })] })],
     })),
   });
   const bodyRows = t.rows.map((row) => new TableRow({
@@ -125,6 +179,10 @@ function tableToDocx(t: TableData): Table {
   }));
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: edges, bottom: edges, left: edges, right: edges,
+      insideHorizontal: inside, insideVertical: inside,
+    } as never,
     rows: [headerRow, ...bodyRows],
   });
 }
@@ -138,6 +196,17 @@ async function buildDocument(input: DocxInput): Promise<Document> {
       alignment: AlignmentType.CENTER,
       children: [new TextRun({ text: input.title, bold: true })],
     }));
+  }
+
+  // 自动目录：仅当正文存在 1-3 级标题时插入，覆盖最多 3 级（TOC 域，WPS/Word 打开自动刷新）
+  const hasHeadings = (input.paragraphs ?? []).some((p) => p.level && p.level >= 1 && p.level <= 3);
+  if (hasHeadings) {
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      children: [new TextRun({ text: '目录', bold: true })],
+    }));
+    children.push(new TableOfContents({ caption: '', alignment: AlignmentType.LEFT, hyperlink: true, headingStyleRange: '1-3' } as never));
+    children.push(new Paragraph({ children: [] }));
   }
 
   for (const p of input.paragraphs ?? []) children.push(paragraphToDocx(p));
@@ -154,6 +223,9 @@ async function buildDocument(input: DocxInput): Promise<Document> {
   return new Document({
     creator: input.author,
     title: input.title,
+    styles: DEFAULT_DOCX_STYLES,
+    // 让 WPS/Word 打开时自动刷新目录域
+    features: { updateFields: true },
     numbering: {
       config: [{ reference: 'bullets', levels: [{ level: 0, format: LevelFormat.BULLET, text: '\u2022', alignment: AlignmentType.LEFT }] }],
     },
@@ -168,20 +240,69 @@ async function buildDocument(input: DocxInput): Promise<Document> {
 }
 
 /**
- * Apply a style template: copy the template's styles, theme and font table into
- * the freshly generated document so the output inherits the template's visual
- * design (fonts / colors / heading styles) instead of the default look.
+ * Apply a style template by MERGING its styles/theme/fonts into the freshly
+ * generated document, instead of blindly overwriting `styles.xml`.
+ *
+ * The generated document's `document.xml` references fixed style ids
+ * (`Title`, `Heading1`...`Heading6`, `Normal`) that the docx library emits.
+ * Many user templates only define numbered ids (`a`, `a0`..`a5`) with no
+ * `Heading1` etc., so wholesale-replacing `styles.xml` makes every heading fall
+ * back to body text. Here we:
+ *   - start from the generated `styles.xml` (guarantees every referenced id exists),
+ *   - overlay each template style by the SAME id so a user's custom look wins,
+ *   - keep the generated heading/title definitions when the template lacks them,
+ *   - theme + fontTable come from the template for its brand fonts.
+ * This yields a readable layout that still honors a real template's styling.
  */
 async function applyStyleTemplate(generated: Buffer, template: Buffer): Promise<Buffer> {
   const gen = await JSZip.loadAsync(generated);
   const tpl = await JSZip.loadAsync(template);
-  const parts = ['word/styles.xml', 'word/theme/theme1.xml', 'word/fontTable.xml'];
-  for (const part of parts) {
-    const file = tpl.file(part);
-    if (file) {
-      gen.file(part, await file.async('string'));
+
+  const genStyles = await gen.file('word/styles.xml')?.async('string');
+  const tplStyles = await tpl.file('word/styles.xml')?.async('string');
+  if (genStyles && tplStyles) {
+    // collect each <w:style ...>...</w:style> by styleId
+    const collect = (xml: string): Map<string, string> => {
+      const m = new Map<string, string>();
+      const re = /<w:style\b[\s\S]*?<\/w:style>/g;
+      let hit: RegExpExecArray | null;
+      while ((hit = re.exec(xml))) {
+        const id = /w:styleId="([^"]+)"/.exec(hit[0])?.[1];
+        if (id) m.set(id, hit[0]);
+      }
+      return m;
+    };
+    const genMap = collect(genStyles);
+    const tplMap = collect(tplStyles);
+    const merged = new Map<string, string>(genMap); // start from generated (all ids exist)
+    for (const [id, xml] of tplMap) {
+      // If the template has a "real" heading id (Heading1 etc.) it wins; otherwise
+      // keep the generated one so title/headings never degrade to body text.
+      if (/^(Title|Heading[1-6])$/i.test(id)) merged.set(id, xml);
+      else merged.set(id, xml);
     }
+    // Preserve generated heading/title styles that the template lacks entirely
+    for (const [id, xml] of genMap) {
+      if (/^(Title|Heading[1-6])$/i.test(id) && !tplMap.has(id)) merged.set(id, xml);
+    }
+    // docDefaults: prefer template's (fonts/paragraph defaults), else generated
+    const tplDefaults = /<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(tplStyles)?.[0];
+    const genDefaults = /<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(genStyles)?.[0];
+    const defaults = tplDefaults || genDefaults || '';
+    const styleList = [...merged.values()].join('');
+    const nextGen = genStyles.replace(/<w:style\b[\s\S]*?<\/w:style>/g, '').replace(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/g, '');
+    // rebuild: keep everything **before** <w:styles> body (latentStyles etc.) minimal
+    const header = /(<w:styles[^>]*>)/.exec(genStyles)?.[1] ?? '<w:styles>';
+    const tail = '</w:styles>';
+    gen.file('word/styles.xml', `${header}${defaults}${styleList}${tail}`);
   }
+
+  // theme + fontTable from template (brand fonts / colors)
+  for (const part of ['word/theme/theme1.xml', 'word/fontTable.xml']) {
+    const file = tpl.file(part);
+    if (file) gen.file(part, await file.async('string'));
+  }
+
   return Buffer.from(await gen.generateAsync({ type: 'nodebuffer' }));
 }
 

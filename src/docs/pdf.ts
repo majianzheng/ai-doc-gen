@@ -146,11 +146,14 @@ export const pdfGenerator: Generator = {
         const style = fontStyle(p);
         doc.font(fontName(style, p.text)).fontSize(style.size).fillColor(p.color ?? '#131313');
         const opts = p.align ? { align: p.align } : undefined;
+        // 正文段落：首行缩进 2 字符（标题不加缩进），提升中文排版可读性
+        const isHeading = (p.level ?? 0) >= 1 && (p.level ?? 0) <= 3;
+        const indentOpt = (!isHeading && !p.bullet) ? { indent: 24 } : {};
         if (p.bullet) {
           doc.text('•  ', Object.assign({ continued: true }, opts));
-          doc.text(p.text, opts);
+          doc.text(p.text, Object.assign({}, opts, indentOpt));
         } else {
-          doc.text(p.text, opts);
+          doc.text(p.text, Object.assign({}, opts, indentOpt));
         }
         doc.moveDown(0.4);
       }

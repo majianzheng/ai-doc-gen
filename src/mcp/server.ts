@@ -98,6 +98,7 @@ async function generateSafe(fn: () => Promise<GeneratedDocument>) {
           text: `文档生成失败 / generation failed — 原因: ${reason}。请向用户说明失败原因，并按要求修正后重试。`,
         },
       ],
+      structuredContent: { ok: false, error: reason },
     };
   }
 }
@@ -261,24 +262,24 @@ export function createMcpServer(service: DocumentService): McpServer {
 }
 
 function toMcpResult(doc: GeneratedDocument) {
+  const structured = {
+    format: doc.format,
+    filename: doc.filename,
+    url: doc.url,
+    size: doc.size,
+    mimeType: doc.mimeType,
+    createdAt: doc.createdAt,
+  };
   return {
     content: [
       {
         type: 'text' as const,
-        text: JSON.stringify(
-          {
-            format: doc.format,
-            filename: doc.filename,
-            url: doc.url,
-            size: doc.size,
-            mimeType: doc.mimeType,
-            createdAt: doc.createdAt,
-          },
-          null,
-          2,
-        ),
+        text: JSON.stringify(structured, null, 2),
       },
     ],
+    // MCP SDK 校验 outputSchema 时要求结果带 structuredContent，否则抛
+    // "has an output schema but no structured content was provided" (-32602)。
+    structuredContent: structured,
   };
 }
 
