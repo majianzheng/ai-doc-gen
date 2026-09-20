@@ -24,7 +24,12 @@ export function mimeOf(format) {
 export async function renderDocx(bytes, container, opts = {}) {
   const data = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes;
   await renderDocxAsync(data, container, container, {
-    className: 'docx-preview', inWrapper: true, ignoreWidth: false, ...opts,
+    className: 'docx-preview', inWrapper: true, ignoreWidth: false,
+    // breakPages 让 docx-preview 在每节(sectPr)/显式分页符处分页；renderHeaders 让每页尝试渲染页眉页脚
+    //（仅对含多个节或显式分页符的文档生效；Word 的"内容超页自动分页"docx-preview 无法模拟）
+    breakPages: true,
+    renderHeaders: true,
+    ...opts,
   });
   return { ok: true };
 }
