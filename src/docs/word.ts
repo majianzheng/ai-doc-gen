@@ -314,76 +314,124 @@ async function applyStyleTemplate(generated: Buffer, template: Buffer): Promise<
  * e.g. logos in word/media/*) into the freshly generated docx, and wire them up
  * via the document's sectPr (headerReference / footerReference) + rels.
  *
- * Word wraps page-level header/footer content in standalone parts:
- *   - word/header1.xml, word/footer1.xml
- *   - word/_rels/header1.xml.rels  (image etc. targets)
- * The generated document's <w:sectPr> references these by r:id, which we resolve
- * to a fresh relationship id in the generated package.
+ * IMPORTANT (OOXML validity):
+ *  - The header/footer part and its own .rels share an *internal* rId namespace
+ *    (e.g. header2.xml references r:embed="rId1" -> header2.xml.rels rId1). We must
+ *    copy BOTH verbatim so the pairing stays intact — never rewrite those rIds.
+ *  - Only the *document-level* relationship (document.xml.rels -> headerN.xml) and
+ *    the sectPr headerReference/footerReference use a NEW rId, allocated here.
+ *  - Some templates (esp. WPS) declare headerReference/footerReference with
+ *    w:type="first"/"even" but never set `evenAndOddHeaders`/`titlePg`, which Word
+ *    treats as corrupt. To stay safe we only wire up the `default` page type and
+ *    pick the most content-rich header/footer part (+ its resources).
  */
 async function copyTemplateHeaderFooter(gen: JSZip, tpl: JSZip): Promise<void> {
   const genDocRelsName = 'word/_rels/document.xml.rels';
   let genDocRels = (await gen.file(genDocRelsName)?.async('string')) ?? '';
-  // determine a free rId in the generated package
   const used = new Set<string>([...genDocRels.matchAll(/Id="(rId\d+)"/g)].map((m) => m[1]));
   let next = 1;
   const newId = (): string => { let id: string; do { id = 'rId' + next++; } while (used.has(id)); used.add(id); return id; };
 
-  // collect template header/footer part names + their rels
-  const partNames = Object.keys(tpl.files).filter((n) => /^word\/header\d+\.xml$/.test(n) || /^word\/footer\d+\.xml$/.test(n));
-  if (!partNames.length) return;
+  // ---- 1) 读取模板 document.xml.rels：rId -> part path ----
+  const tplDocRels = (await tpl.file(genDocRelsName)?.async('string')) ?? '';
+  const tplRelMap = new Map<string, string>();
+  for (const m of tplDocRels.matchAll(/<Relationship Id="([^"]+)" Type="([^"]+)" Target="([^"]+)"/g)) {
+    const [, rid, type, target] = m;
+    if (/header$|footer$/.test(type)) tplRelMap.set(rid, 'word/' + target);
+  }
 
-  // map: template rId -> generated rId, so we can rewrite sectPr references
-  const idMap = new Map<string, string>();
-  const copyRel = async (relsPath: string): Promise<void> => {
-    const relStr = (await tpl.file(relsPath)?.async('string')) ?? '';
-    if (!relStr) return;
-    const rels = [...relStr.matchAll(/<Relationship Id="([^"]+)" Type="([^"]+)" Target="([^"]+)"/g)];
-    const newRels: string[] = [];
-    for (const [, rid, type, target] of rels) {
-      const gid = newId();
-      idMap.set(rid, gid);
-      newRels.push(`<Relationship Id="${gid}" Type="${type}" Target="${target}"/>`);
-      // copy referenced target (e.g. media/image1.jpeg) verbatim into the package
-      const targetName = 'word/' + target.replace(/^\.\//, '');
-      const targetFile = tpl.file(targetName);
-      if (targetFile) gen.file(targetName, await targetFile.async('nodebuffer'));
-    }
-    gen.file(relsPath, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${newRels.join('')}</Relationships>`);
+  // ---- 2) 从模板 sectPr 得到一堆 (kind, type, partPath) 引用，只保留 default ----
+  const tplDocXml = (await tpl.file('word/document.xml')?.async('string')) ?? '';
+  const sectPr = /<w:sectPr[\s\S]*?<\/w:sectPr>/.exec(tplDocXml)?.[0] ?? '';
+  const candidates: Array<{ kind: 'header' | 'footer'; type: string; part: string }> = [];
+  for (const m of sectPr.matchAll(/<w:(headerReference|footerReference) w:type="([^"]+)" r:id="([^"]+)"/g)) {
+    const kind = (m[1] as 'headerReference' | 'footerReference') === 'headerReference' ? 'header' : 'footer';
+    const part = tplRelMap.get(m[3]);
+    if (part) candidates.push({ kind, type: m[2], part });
+  }
+  if (!candidates.length) return;
+
+  // ---- 3) 选 default 部件；若无 default，选内容最丰富的那个 ----
+  const richness = (p: string): number => {
+    const f = tpl.file(p);
+    return f ? f.async('string').then((x) => x.length).catch(() => 0) as unknown as number : 0;
+  };
+  const pick = async (kind: 'header' | 'footer'): Promise<string | null> => {
+    const list = candidates.filter((c) => c.kind === kind);
+    if (!list.length) return null;
+    const def = list.find((c) => c.type === 'default');
+    if (def) return def.part;
+    // fall back to the largest part (most content)
+    const sizes: Array<{ part: string; n: number }> = [];
+    for (const c of list) sizes.push({ part: c.part, n: await richness(c.part) });
+    sizes.sort((a, b) => b.n - a.n);
+    return sizes[0]?.part ?? null;
   };
 
-  // copy each header/footer part + its own rels
-  for (const part of partNames) {
-    gen.file(part, await tpl.file(part)!.async('nodebuffer'));
-    const relsPath = 'word/_rels/' + part.split('/').pop() + '.rels';
-    if (tpl.file(relsPath)) await copyRel(relsPath);
-  }
+  const headerPart = await pick('header');
+  const footerPart = await pick('footer');
 
-  // extend document.xml.rels with header/footer relationships
-  const headerParts: string[] = [];
-  const footerParts: string[] = [];
-  for (const part of partNames) {
+  // ---- 4) 拷贝选中的 header/footer 部件 + 它们的 .rels + 引用资源（原样，内部 rId 不动）----
+  const copyPart = async (part: string, kind: 'header' | 'footer'): Promise<string> => {
     const base = part.split('/').pop() as string;
-    const isHeader = /^header\d+\.xml$/.test(base);
-    const relType = isHeader
+    // 部件本身 + 其 .rels 原样拷贝（内部 rId 自洽）
+    gen.file(part, await tpl.file(part)!.async('nodebuffer'));
+    const relsPath = 'word/_rels/' + base + '.rels';
+    const relStr = (await tpl.file(relsPath)?.async('string')) ?? '';
+    if (relStr) {
+      gen.file(relsPath, relStr);
+      // 拷贝其引用的资源（如 media/image1.jpeg、引用文档等），保持相同内部 rId
+      for (const rm of relStr.matchAll(/<Relationship Id="([^"]+)" Type="([^"]+)" Target="([^"]+)"/g)) {
+        const [, , rtype, rtarget] = rm;
+        if (/^https?:|\/wordmedia\//.test(rtarget)) continue;
+        const targetName = 'word/' + rtarget.replace(/^\.\//, '');
+        const tf = tpl.file(targetName);
+        if (tf) gen.file(targetName, await tf.async('nodebuffer'));
+        // 若目标还有自己的 rels（如 header 引用到 image 的 caption 等），一并拷贝
+        const rtRels = 'word/_rels/' + targetName.split('/').pop() + '.rels';
+        const rf = tpl.file(rtRels);
+        if (rf) gen.file(rtRels, await rf.async('string'));
+      }
+    }
+    // document.xml.rels 顶层关联（新 rId 指向该部件）
+    const gid = newId();
+    const relType = kind === 'header'
       ? 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/header'
       : 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer';
-    const gid = newId();
-    idMap.set('part::' + part, gid);
-    (isHeader ? headerParts : footerParts).push(`${part}::${gid}`);
-    genDocRels = genDocRels.replace(
-      '</Relationships>',
-      `<Relationship Id="${gid}" Type="${relType}" Target="${base}"/></Relationships>`,
-    );
-  }
-  gen.file(genDocRelsName, genDocRels);
+    genDocRels = genDocRels.replace('</Relationships>', `<Relationship Id="${gid}" Type="${relType}" Target="${base}"/></Relationships>`);
+    gen.file(genDocRelsName, genDocRels);
+    return gid;
+  };
 
-  // add headerReference / footerReference to the document sectPr
-  const docXml = (await gen.file('word/document.xml')?.async('string')) ?? '';
-  if (docXml.includes('<w:sectPr>')) {
+  const hId = headerPart ? await copyPart(headerPart, 'header') : null;
+  const fId = footerPart ? await copyPart(footerPart, 'footer') : null;
+
+  // ---- 5) 注册 header/footer 部件的 Content-Type（OOXML 必需，否则 Word 报"无法读取内容"）----
+  // docx 库生成的 [Content_Types].xml 不含模板新增的 header/footer 部件声明。
+  const ctName = '[Content_Types].xml';
+  const ctXml = (await gen.file(ctName)?.async('string')) ?? '';
+  let ct = ctXml;
+  const addOverride = (partName: string, contentType: string): void => {
+    if (ct.includes(`PartName="${partName}"`)) return;
+    ct = ct.replace('</Types>', `<Override ContentType="${contentType}" PartName="${partName}"/></Types>`);
+  };
+  if (headerPart) {
+    const base = headerPart.split('/').pop() as string;
+    addOverride(`/word/${base}`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml');
+  }
+  if (footerPart) {
+    const base = footerPart.split('/').pop() as string;
+    addOverride(`/word/${base}`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml');
+  }
+  if (ct !== ctXml) gen.file(ctName, ct);
+
+  // ---- 6) 写 sectPr：仅 default 引用 ----
+  const genDocXml = (await gen.file('word/document.xml')?.async('string')) ?? '';
+  if (genDocXml.includes('<w:sectPr>')) {
     let refs = '';
-    for (const item of headerParts) { const [part, gid] = item.split('::'); refs += `<w:headerReference w:type="default" r:id="${gid}"/>`; }
-    for (const item of footerParts) { const [part, gid] = item.split('::'); refs += `<w:footerReference w:type="default" r:id="${gid}"/>`; }
-    if (refs) gen.file('word/document.xml', docXml.replace('<w:sectPr>', `<w:sectPr>${refs}`));
+    if (hId) refs += `<w:headerReference w:type="default" r:id="${hId}"/>`;
+    if (fId) refs += `<w:footerReference w:type="default" r:id="${fId}"/>`;
+    if (refs) gen.file('word/document.xml', genDocXml.replace('<w:sectPr>', `<w:sectPr>${refs}`));
   }
 }
 
