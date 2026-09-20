@@ -14,10 +14,6 @@ import { UserStore } from './users.js';
 import { SessionManager } from './session.js';
 import { SsoConfigStore } from './sso/index.js';
 import { createAuth, type AuthContext } from './auth.js';
-import {
-  buildOnlyOfficeConfig, signFileUrl, verifyFileUrl, parseOnlyOfficeCallback,
-  type OnlyOfficeConfig,
-} from './onlyoffice.js';
 
 // Admin flows provide the caller identity from the logged-in session and the
 // file name separately, so they use the relaxed (admin) input schemas.
@@ -172,15 +168,6 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
 
   const isAdmin = (req: express.Request) => req.user?.role === 'admin';
 
-  const onlyOffice: OnlyOfficeConfig | null = config.onlyoffice.enabled && config.onlyoffice.serverUrl && config.onlyoffice.secret
-    ? {
-        enabled: true,
-        serverUrl: config.onlyoffice.serverUrl,
-        secret: config.onlyoffice.secret,
-        publicBaseUrl: config.onlyoffice.publicBaseUrl || config.local.publicBaseUrl,
-      }
-    : null;
-
   const publicDir = resolvePublicDir();
   app.use(express.static(publicDir));
   app.get('/', (_req, res) => res.sendFile(join(publicDir, 'index.html')));
@@ -191,7 +178,6 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
       storageMode: config.storageMode,
       formats: listGenerators().map((g) => ({ format: g.format, mimeType: g.mimeType, extension: g.extension })),
       publicBaseUrl: config.storageMode === 'local' ? config.local.publicBaseUrl : (config.s3?.publicBaseUrl ?? null),
-      onlyoffice: onlyOffice ? { enabled: true, serverUrl: onlyOffice.serverUrl } : { enabled: false, serverUrl: '' },
       time: new Date().toISOString(),
     });
   });
@@ -335,67 +321,6 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
       res.status(500).json({ error: resolveError(err) });
     }
   });
-
-  // ---- OnlyOffice Document Server (optional) ----
-  if (onlyOffice) {
-    // OnlyOffice downloads the document bytes itself (no browser session cookie),
-    // so this endpoint is unauthenticated but requires a valid HMAC-signed URL.
-    app.get('/api/files/onlyoffice/file', async (req, res) => {
-      const k = String(req.query.k ?? '');
-      const exp = String(req.query.exp ?? '');
-      const sig = String(req.query.sig ?? '');
-      const key = verifyFileUrl(onlyOffice, k, exp, sig);
-      if (!key) { res.status(403).json({ error: 'invalid or expired URL' }); return; }
-      try {
-        const buffer = await storage.get(key);
-        if (!buffer) { res.status(404).json({ error: 'file not found' }); return; }
-        const fmt = formatFromKey(key);
-        res.setHeader('Content-Type', fmt ? MIME_TYPES[fmt] : 'application/octet-stream');
-        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(key.split('/').pop() ?? 'file')}`);
-        res.setHeader('Content-Length', buffer.length);
-        res.send(buffer);
-      } catch (err) { res.status(500).json({ error: resolveError(err) }); }
-    });
-
-    // OnlyOffice callback: acknowledges save/status changes. We don't persist
-    // edits from the viewer by default, so just return { error: 0 }.
-    app.post('/api/files/onlyoffice/callback', (req, res) => {
-      const c = parseOnlyOfficeCallback(req.body);
-      // status: 2 = document ready to download (i.e. saved). Since we are
-      // view-only this is harmless; log it for traceability.
-      logAudit(req, { action: 'onlyoffice.callback', detail: `status=${c.status} key=${c.key ?? ''}` });
-      res.json({ error: 0 });
-    });
-
-    // Generate the OnlyOffice editor config for a stored file (requires login).
-    app.post('/api/onlyoffice/config', auth.requireAuth, async (req, res) => {
-      const b = (req.body ?? {}) as { key?: unknown; title?: unknown; mode?: unknown };
-      const key = typeof b.key === 'string' ? b.key.trim() : '';
-      const title = typeof b.title === 'string' ? b.title.trim() : (key.split('/').pop() ?? '文档');
-      const mode = b.mode === 'edit' ? 'edit' : 'view';
-      if (!key) { res.status(400).json({ error: 'file key is required' }); return; }
-      if (!req.user || (!isAdmin(req) && !fileBelongsToUser(key, req.user.username))) {
-        res.status(403).json({ error: 'forbidden' });
-        return;
-      }
-      const fmt = formatFromKey(key);
-      if (!fmt || fmt === 'pdf') { res.status(400).json({ error: 'OnlyOffice preview supports docx/xlsx/pptx' }); return; }
-      const fileType = (key.split('.').pop() ?? '').toLowerCase();
-      const base = onlyOffice.publicBaseUrl;
-      const docUrl = base + signFileUrl(onlyOffice, key);
-      const cbUrl = base + `/api/files/onlyoffice/callback?k=${encodeURIComponent(key)}`;
-      const cfg = await buildOnlyOfficeConfig(onlyOffice, {
-        fileKey: Buffer.from(key).toString('base64url').slice(0, 120), // onlyoffice key: max 128 chars
-        fileType,
-        title,
-        documentUrl: docUrl,
-        callbackUrl: cbUrl,
-        mode,
-        user: { id: req.user.username, name: req.user.name ?? req.user.username },
-      });
-      res.json({ ...cfg, serverUrl: onlyOffice.serverUrl });
-    });
-  }
 
   // ---- style templates (per-user: system templates are read-only for users) ----
   app.get('/api/style-templates', auth.requireAuth, async (req, res) => {

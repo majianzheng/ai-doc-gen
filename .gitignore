@@ -21,3 +21,6 @@ Presentation.pptx
 
 # local test data
 .testdata/
+
+# build-generation output (copied from src/admin/public/vendor by sync-web-assets.mjs)
+web/public/

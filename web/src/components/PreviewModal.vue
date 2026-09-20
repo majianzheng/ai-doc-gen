@@ -4,7 +4,7 @@ import { t } from '../store.js';
 
 const props = defineProps({
   modelValue: Boolean,
-  file: { type: Object, default: null }, // { name, format, size, previewUrl, downloadUrl, url, lastModified }
+  file: { type: Object, default: null }, // { name, format, size, previewUrl, downloadUrl, url, lastModified, key }
 });
 const emit = defineEmits(['update:modelValue']);
 
@@ -15,7 +15,9 @@ const sheets = ref([]);
 const activeSheet = ref('');
 let buf = null;
 
-function close() { emit('update:modelValue', false); }
+function close() {
+  emit('update:modelValue', false);
+}
 function fmtBytes(n) { if (n == null) return '-'; if (n < 1024) return n + ' B'; if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'; return (n / 1024 / 1024).toFixed(2) + ' MB'; }
 
 function viewerName(format) {
@@ -25,8 +27,8 @@ function viewerName(format) {
 async function render(raw, sheet) {
   const el = contentEl.value;
   if (!el || !props.file) return;
-  el.innerHTML = '';
   const format = props.file.format;
+  el.innerHTML = '';
   const V = window.AIDocViewers;
   if (!V || !V[viewerName(format)]) {
     if (format === 'pdf') {

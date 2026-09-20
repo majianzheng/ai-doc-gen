@@ -1247,10 +1247,8 @@ function renderMeta() {
 async function loadMeta() {
   try {
     state.meta = await api('/api/meta');
-    window.AIDocOnlyOffice = state.meta.onlyoffice || { enabled: false, serverUrl: '' };
     renderMeta();
   } catch (err) {
-    window.AIDocOnlyOffice = { enabled: false, serverUrl: '' };
     $('#metaStorage').textContent = t('meta.offline');
     toast(t('meta.connectFail', { msg: err.message }), 'err');
   }
@@ -1941,12 +1939,6 @@ function renderPreview(file, buf, opts) {
   const footer = $('#previewState');
   let metaHtml = '';
 
-  // OnlyOffice: render docx/xlsx/pptx in a true office engine when enabled.
-  if (window.AIDocOnlyOffice && window.AIDocOnlyOffice.enabled && ['docx', 'xlsx', 'pptx'].indexOf(file.format) > -1) {
-    renderOnlyOffice(file, content, footer);
-    return;
-  }
-
   if (!window.AIDocViewers || !window.AIDocViewers['render' + file.format.slice(0, 1).toUpperCase() + file.format.slice(1)]) {
     if (file.format === 'pdf') {
       // native fallback for PDF
@@ -2044,57 +2036,8 @@ function openPreview(file) {
     });
 }
 
-// ---- OnlyOffice Document Server preview ----
-function renderOnlyOffice(file, content, footer) {
-  content.innerHTML = '';
-  const holder = document.createElement('div');
-  holder.id = 'onlyoffice-holder';
-  holder.style.width = '100%';
-  holder.style.height = '100%';
-  holder.style.minHeight = '600px';
-  content.appendChild(holder);
-  if (footer) footer.textContent = '';
-
-  fetch('/api/onlyoffice/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: file.key, title: file.name, mode: 'view' }),
-  })
-    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then((cfg) => {
-      if (!cfg || !cfg.serverUrl) throw new Error('OnlyOffice 未配置');
-      const serverUrl = cfg.serverUrl.replace(/\/+$/, '');
-      // load the OnlyOffice SDK once
-      const loadOo = () => new Promise((resolve, reject) => {
-        if (window.DocsAPI) { resolve(); return; }
-        const existing = document.querySelector('script[data-ooapi]');
-        if (existing) { existing.addEventListener('load', resolve, { once: true }); existing.addEventListener('error', reject, { once: true }); return; }
-        const s = document.createElement('script');
-        s.src = serverUrl + '/web-apps/apps/api/documents/api.js';
-        s.setAttribute('data-ooapi', '1');
-        s.onload = resolve; s.onerror = reject;
-        document.head.appendChild(s);
-      });
-      return loadOo().then(() => {
-        const config = { ...cfg.config, token: cfg.token };
-        if (state.preview && state.preview.ooEditor) {
-          try { state.preview.ooEditor.destroyEditor(); } catch { /* ignore */ }
-        }
-        state.preview.ooEditor = new window.DocsAPI.DocEditor('onlyoffice-holder', config);
-      });
-    })
-    .catch((err) => {
-      setPreviewStatus('error', t('preview.renderFail', { msg: err.message }));
-      holder.innerHTML = '';
-    });
-}
-
 function closePreview() {
   const content = $('#previewContent');
-  if (state.preview && state.preview.ooEditor) {
-    try { state.preview.ooEditor.destroyEditor(); } catch { /* ignore */ }
-    state.preview.ooEditor = null;
-  }
   content.innerHTML = '';
   $('#modal').classList.add('hidden');
   state.preview = null;
