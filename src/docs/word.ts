@@ -303,7 +303,88 @@ async function applyStyleTemplate(generated: Buffer, template: Buffer): Promise<
     if (file) gen.file(part, await file.async('string'));
   }
 
+  // ---- 移植模板的页眉/页脚（含其引用的图片等资源）----
+  await copyTemplateHeaderFooter(gen, tpl);
+
   return Buffer.from(await gen.generateAsync({ type: 'nodebuffer' }));
+}
+
+/**
+ * Copy the template's header / footer Parts (and any resources they reference,
+ * e.g. logos in word/media/*) into the freshly generated docx, and wire them up
+ * via the document's sectPr (headerReference / footerReference) + rels.
+ *
+ * Word wraps page-level header/footer content in standalone parts:
+ *   - word/header1.xml, word/footer1.xml
+ *   - word/_rels/header1.xml.rels  (image etc. targets)
+ * The generated document's <w:sectPr> references these by r:id, which we resolve
+ * to a fresh relationship id in the generated package.
+ */
+async function copyTemplateHeaderFooter(gen: JSZip, tpl: JSZip): Promise<void> {
+  const genDocRelsName = 'word/_rels/document.xml.rels';
+  let genDocRels = (await gen.file(genDocRelsName)?.async('string')) ?? '';
+  // determine a free rId in the generated package
+  const used = new Set<string>([...genDocRels.matchAll(/Id="(rId\d+)"/g)].map((m) => m[1]));
+  let next = 1;
+  const newId = (): string => { let id: string; do { id = 'rId' + next++; } while (used.has(id)); used.add(id); return id; };
+
+  // collect template header/footer part names + their rels
+  const partNames = Object.keys(tpl.files).filter((n) => /^word\/header\d+\.xml$/.test(n) || /^word\/footer\d+\.xml$/.test(n));
+  if (!partNames.length) return;
+
+  // map: template rId -> generated rId, so we can rewrite sectPr references
+  const idMap = new Map<string, string>();
+  const copyRel = async (relsPath: string): Promise<void> => {
+    const relStr = (await tpl.file(relsPath)?.async('string')) ?? '';
+    if (!relStr) return;
+    const rels = [...relStr.matchAll(/<Relationship Id="([^"]+)" Type="([^"]+)" Target="([^"]+)"/g)];
+    const newRels: string[] = [];
+    for (const [, rid, type, target] of rels) {
+      const gid = newId();
+      idMap.set(rid, gid);
+      newRels.push(`<Relationship Id="${gid}" Type="${type}" Target="${target}"/>`);
+      // copy referenced target (e.g. media/image1.jpeg) verbatim into the package
+      const targetName = 'word/' + target.replace(/^\.\//, '');
+      const targetFile = tpl.file(targetName);
+      if (targetFile) gen.file(targetName, await targetFile.async('nodebuffer'));
+    }
+    gen.file(relsPath, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${newRels.join('')}</Relationships>`);
+  };
+
+  // copy each header/footer part + its own rels
+  for (const part of partNames) {
+    gen.file(part, await tpl.file(part)!.async('nodebuffer'));
+    const relsPath = 'word/_rels/' + part.split('/').pop() + '.rels';
+    if (tpl.file(relsPath)) await copyRel(relsPath);
+  }
+
+  // extend document.xml.rels with header/footer relationships
+  const headerParts: string[] = [];
+  const footerParts: string[] = [];
+  for (const part of partNames) {
+    const base = part.split('/').pop() as string;
+    const isHeader = /^header\d+\.xml$/.test(base);
+    const relType = isHeader
+      ? 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/header'
+      : 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer';
+    const gid = newId();
+    idMap.set('part::' + part, gid);
+    (isHeader ? headerParts : footerParts).push(`${part}::${gid}`);
+    genDocRels = genDocRels.replace(
+      '</Relationships>',
+      `<Relationship Id="${gid}" Type="${relType}" Target="${base}"/></Relationships>`,
+    );
+  }
+  gen.file(genDocRelsName, genDocRels);
+
+  // add headerReference / footerReference to the document sectPr
+  const docXml = (await gen.file('word/document.xml')?.async('string')) ?? '';
+  if (docXml.includes('<w:sectPr>')) {
+    let refs = '';
+    for (const item of headerParts) { const [part, gid] = item.split('::'); refs += `<w:headerReference w:type="default" r:id="${gid}"/>`; }
+    for (const item of footerParts) { const [part, gid] = item.split('::'); refs += `<w:footerReference w:type="default" r:id="${gid}"/>`; }
+    if (refs) gen.file('word/document.xml', docXml.replace('<w:sectPr>', `<w:sectPr>${refs}`));
+  }
 }
 
 export const docxGenerator: Generator = {
