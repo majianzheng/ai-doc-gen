@@ -41,10 +41,23 @@ export interface ImageItem {
   width?: number;
   /** rendered height in px (omit to auto-size from the aspect ratio) */
   height?: number;
-  /** horizontal placement */
+  /** horizontal placement (left / center / right) when auto-laying out */
   align?: 'left' | 'center' | 'right';
   /** optional caption / figure text rendered underneath the image */
   caption?: string;
+  /**
+   * Excel only — anchor the image's top-left corner to a cell so it moves with
+   * that cell (插入到单元格, editAs=oneCell). `col`/`row` are 0-based. Ignored
+   * when `position` is provided.
+   */
+  cell?: { col: number; row: number };
+  /**
+   * Place the image at an absolute position (任意位置), in pixels from the
+   * top-left of the sheet / slide (96px = 1 inch). `w`/`h` override the size;
+   * when omitted the size is derived from `width`/`height` or the intrinsic
+   * ratio. Used by Excel (floating) and PPT (exact spot + size).
+   */
+  position?: { x: number; y: number; w?: number; h?: number };
 }
 
 export interface DocxInput {

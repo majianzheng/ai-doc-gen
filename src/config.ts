@@ -53,6 +53,18 @@ export interface Config {
   transport: 'stdio' | 'http';
   mcpPath: string;
   verbose: boolean;
+  /** OnlyOffice Document Server integration (optional). */
+  onlyoffice: OnlyOfficeServerConfig;
+}
+
+export interface OnlyOfficeServerConfig {
+  enabled: boolean;
+  /** base URL of the OnlyOffice Document Server, e.g. http://10.88.8.201:8082 */
+  serverUrl: string;
+  /** shared JWT secret; must match the Document Server's JWT secret */
+  secret: string;
+  /** public base URL of *this* admin service (OnlyOffice downloads files / sends callbacks here) */
+  publicBaseUrl: string;
 }
 
 function boolEnv(name: string, fallback = false): boolean {
@@ -116,5 +128,11 @@ export function loadConfig(): Config {
     transport,
     mcpPath: (process.env.MCP_PATH ?? '/mcp').replace(/^\/+/, '').replace(/^/, '/'),
     verbose: boolEnv('VERBOSE'),
+    onlyoffice: {
+      enabled: boolEnv('ONLYOFFICE_ENABLED'),
+      serverUrl: (process.env.ONLYOFFICE_SERVER_URL ?? '').replace(/\/+$/, ''),
+      secret: process.env.ONLYOFFICE_SECRET ?? '',
+      publicBaseUrl: (process.env.ONLYOFFICE_PUBLIC_BASE_URL ?? '').replace(/\/+$/, ''),
+    },
   };
 }

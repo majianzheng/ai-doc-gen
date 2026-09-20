@@ -43,12 +43,22 @@ if (-not (Test-Path "$LocalPath\src")) {
 
 Write-Host "==> Deploying ai-doc to $Server`:$RemotePath" -ForegroundColor Cyan
 
+# 0. Build locally (tsc server + Vite frontend) so only the compiled `dist` is
+#    uploaded — the Docker image never runs the build or needs dev dependencies.
+Write-Host "==> Building locally (npm run build)" -ForegroundColor Cyan
+& npm.cmd run build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: local build failed" -ForegroundColor Red
+    exit 1
+}
+
 # 1. Remote directory
 Write-Host "==> Ensuring remote directory exists" -ForegroundColor Cyan
 ssh.exe $Server "mkdir -p '$RemotePath'"
 
-# 2. Transfer build context (no lockfiles; .dockerignore excludes them on the server)
-$files = @('Dockerfile', 'docker-compose.yml', '.dockerignore', '.env.example', 'package.json', 'tsconfig.json', 'src', 'scripts')
+# 2. Transfer the pre-built `dist` plus the Docker build files (no src/scripts/
+#    web required — nothing is compiled on the server).
+$files = @('Dockerfile', 'docker-compose.yml', '.dockerignore', '.env.example', 'package.json', 'dist')
 foreach ($f in $files) {
     Write-Host "  -> $f" -ForegroundColor Gray
     scp.exe -r "$LocalPath\$f" "${Server}:$RemotePath/"

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="pdf-worker" content="/vendor/pdf.worker.min.mjs" />
   <title>AI-Doc 管理后台</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body data-theme="light">
@@ -177,68 +178,54 @@
         </div>
       </section>
 
-      <!-- ============ 内容模板 ============ -->
+      <!-- ============ 在线生成 ============ -->
       <section id="view-templates" class="view">
         <div class="page-head">
           <div>
-            <h2 data-i18n="tpl.title">模板库</h2>
-            <p class="page-sub" data-i18n="tpl.subtitle">管理文档内容模板,基于 JSON 定义文档结构、一键生成</p>
+            <h2 data-i18n="gen.title">在线生成</h2>
+            <p class="page-sub" data-i18n="gen.subtitle">输入 Markdown 内容，一键生成 Word / PDF / Excel / PPT 文档</p>
           </div>
-          <button id="tplNew" class="btn btn-primary">
-            <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            <span data-i18n="tpl.new">新建模板</span>
-          </button>
         </div>
 
-        <div class="tpl-layout">
-          <div class="tpl-side">
-            <div class="card">
-              <ul id="tplList" class="tpl-list"></ul>
-              <div id="tplEmpty" class="empty hidden" data-i18n="tpl.empty">暂无模板</div>
+        <div class="card gen-card">
+          <div class="gen-form">
+            <div class="form-grid gen-grid">
+              <label class="field">
+                <span class="field-label" data-i18n="gen.format">文档格式</span>
+                <select id="genFormat" class="input">
+                  <option value="docx">Word (.docx)</option>
+                  <option value="pdf">PDF</option>
+                  <option value="xlsx">Excel (.xlsx)</option>
+                  <option value="pptx">PowerPoint (.pptx)</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="gen.title">标题</span>
+                <input id="genTitle" type="text" class="input" data-i18n-placeholder="gen.titlePlaceholder" />
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="gen.filename">文件名（不含扩展名）</span>
+                <input id="genFilename" type="text" class="input" data-i18n-placeholder="gen.filenamePlaceholder" />
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="gen.style">套用样式模板</span>
+                <select id="genStyle" class="input"></select>
+                <span id="genStyleCurrent" class="tpl-style-current none"></span>
+              </label>
             </div>
-          </div>
-          <div class="tpl-main">
-            <div class="card editor-card">
-              <div class="editor-head">
-                <input id="tplName" type="text" class="input editor-name" data-i18n-placeholder="tpl.namePlaceholder" />
-                <label class="select-wrap">
-                  <select id="tplFormat" title="Format">
-                    <option value="docx">Word (.docx)</option>
-                    <option value="pdf">PDF</option>
-                    <option value="xlsx">Excel (.xlsx)</option>
-                    <option value="pptx">PowerPoint (.pptx)</option>
-                  </select>
-                </label>
-              </div>
-              <div class="editor-actions">
-                <button id="tplSave" class="btn btn-primary">
-                  <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M17 21v-8H7v8M7 3v5h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-                  <span data-i18n="tpl.save">保存模板</span>
-                </button>
-                <button id="tplGenerate" class="btn btn-accent">
-                  <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M5 3l14 9-14 9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-                  <span data-i18n="tpl.generate">生成文档</span>
-                </button>
-                <button id="tplDelete" class="btn btn-danger">
-                  <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  <span data-i18n="tpl.delete">删除</span>
-                </button>
-              </div>
-              <div class="editor-style">
-                <label for="tplStyle" class="style-label" data-i18n="tpl.styleLabel">套用样式模板</label>
-                <select id="tplStyle" class="input style-select"></select>
-                <span id="tplStyleCurrent" class="tpl-style-current none"></span>
-              </div>
-              <input id="tplDesc" type="text" class="input editor-desc" data-i18n-placeholder="tpl.descPlaceholder" />
-              <div class="editor-toolbar">
-                <button id="tplExample" class="btn btn-ghost" data-i18n="tpl.example">载入示例</button>
-                <button id="tplFormatJson" class="btn btn-ghost" data-i18n="tpl.format">格式化</button>
-                <button id="tplValidate" class="btn btn-ghost" data-i18n="tpl.validate">校验</button>
-                <span id="tplStatus" class="editor-status"></span>
-              </div>
-              <div class="editor-label" data-i18n="tpl.inputLabel">输入 JSON(结构化文档内容)</div>
-              <textarea id="tplInput" class="editor-input" spellcheck="false"></textarea>
-              <div id="tplResult" class="result hidden"></div>
+            <div class="editor-toolbar">
+              <button id="genExample" class="btn btn-ghost" data-i18n="gen.example">载入示例</button>
+              <button id="genClear" class="btn btn-ghost" data-i18n="gen.clear">清空</button>
+              <span id="genStatus" class="editor-status"></span>
+            </div>
+            <div class="editor-label" data-i18n="gen.contentLabel">Markdown 内容</div>
+            <textarea id="genContent" class="editor-input" spellcheck="false"></textarea>
+            <div id="genResult" class="result hidden"></div>
+            <div class="gen-actions">
+              <button id="genSubmit" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" class="btn-ico" aria-hidden="true"><path d="M5 3l14 9-14 9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                <span data-i18n="gen.generate">生成文档</span>
+              </button>
             </div>
           </div>
         </div>

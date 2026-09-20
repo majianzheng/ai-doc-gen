@@ -7,18 +7,21 @@ import { ownerSlug } from '../core.js';
 import type { Config } from '../config.js';
 import type { Storage, StorageObjectInfo } from '../storage/storage.js';
 import { MIME_TYPES, type DocFormat } from '../docs/types.js';
-import { docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema, listGenerators } from '../docs/index.js';
-import { TemplateStore, type TemplateInput } from './templates.js';
+import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, listGenerators } from '../docs/index.js';
 import { StyleTemplateStore, SYSTEM_OWNER } from './styleTemplates.js';
 import { AuditLogStore } from './audit.js';
 import { UserStore } from './users.js';
 import { SessionManager } from './session.js';
 import { SsoConfigStore } from './sso/index.js';
 import { createAuth, type AuthContext } from './auth.js';
+import {
+  buildOnlyOfficeConfig, signFileUrl, verifyFileUrl, parseOnlyOfficeCallback,
+  type OnlyOfficeConfig,
+} from './onlyoffice.js';
 
 // Admin flows provide the caller identity from the logged-in session and the
 // file name separately, so they use the relaxed (admin) input schemas.
-const FORMAT_SCHEMAS = { docx: docxAdminSchema, pdf: pdfAdminSchema, xlsx: xlsxAdminSchema, pptx: pptxAdminSchema } as const;
+const FORMAT_SCHEMAS = { docx: docxSchema, pdf: pdfSchema, xlsx: xlsxSchema, pptx: pptxSchema } as const;
 const SUPPORTED_FORMATS: DocFormat[] = ['docx', 'pdf', 'xlsx', 'pptx'];
 const STYLE_FORMATS: ('pptx' | 'docx' | 'xlsx')[] = ['pptx', 'docx', 'xlsx'];
 
@@ -132,7 +135,6 @@ export interface AdminAppOptions {
   config: Config;
   service: DocumentService;
   storage: Storage;
-  templates: TemplateStore;
   styleTemplates: StyleTemplateStore;
   users: UserStore;
   sessions: SessionManager;
@@ -149,7 +151,7 @@ export interface AdminAppOptions {
  * normal users only ever see their own files (+ system style templates).
  */
 export function createAdminApp(options: AdminAppOptions): express.Express {
-  const { config, service, storage, templates, styleTemplates, users, sessions, ssoConfigStore } = options;
+  const { config, service, storage, styleTemplates, users, sessions, ssoConfigStore } = options;
   const app = express();
   app.set('trust proxy', true);
   app.use(express.json({ limit: '25mb' }));
@@ -170,6 +172,15 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
 
   const isAdmin = (req: express.Request) => req.user?.role === 'admin';
 
+  const onlyOffice: OnlyOfficeConfig | null = config.onlyoffice.enabled && config.onlyoffice.serverUrl && config.onlyoffice.secret
+    ? {
+        enabled: true,
+        serverUrl: config.onlyoffice.serverUrl,
+        secret: config.onlyoffice.secret,
+        publicBaseUrl: config.onlyoffice.publicBaseUrl || config.local.publicBaseUrl,
+      }
+    : null;
+
   const publicDir = resolvePublicDir();
   app.use(express.static(publicDir));
   app.get('/', (_req, res) => res.sendFile(join(publicDir, 'index.html')));
@@ -180,6 +191,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
       storageMode: config.storageMode,
       formats: listGenerators().map((g) => ({ format: g.format, mimeType: g.mimeType, extension: g.extension })),
       publicBaseUrl: config.storageMode === 'local' ? config.local.publicBaseUrl : (config.s3?.publicBaseUrl ?? null),
+      onlyoffice: onlyOffice ? { enabled: true, serverUrl: onlyOffice.serverUrl } : { enabled: false, serverUrl: '' },
       time: new Date().toISOString(),
     });
   });
@@ -324,92 +336,66 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
     }
   });
 
-  // ---- content templates (read for any user; write only admins) ----
-  app.get('/api/templates', auth.requireAuth, async (_req, res) => {
-    try {
-      res.json(await templates.list());
-    } catch (err) {
-      res.status(500).json({ error: resolveError(err) });
-    }
-  });
+  // ---- OnlyOffice Document Server (optional) ----
+  if (onlyOffice) {
+    // OnlyOffice downloads the document bytes itself (no browser session cookie),
+    // so this endpoint is unauthenticated but requires a valid HMAC-signed URL.
+    app.get('/api/files/onlyoffice/file', async (req, res) => {
+      const k = String(req.query.k ?? '');
+      const exp = String(req.query.exp ?? '');
+      const sig = String(req.query.sig ?? '');
+      const key = verifyFileUrl(onlyOffice, k, exp, sig);
+      if (!key) { res.status(403).json({ error: 'invalid or expired URL' }); return; }
+      try {
+        const buffer = await storage.get(key);
+        if (!buffer) { res.status(404).json({ error: 'file not found' }); return; }
+        const fmt = formatFromKey(key);
+        res.setHeader('Content-Type', fmt ? MIME_TYPES[fmt] : 'application/octet-stream');
+        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(key.split('/').pop() ?? 'file')}`);
+        res.setHeader('Content-Length', buffer.length);
+        res.send(buffer);
+      } catch (err) { res.status(500).json({ error: resolveError(err) }); }
+    });
 
-  app.get('/api/templates/:id', auth.requireAuth, async (req, res) => {
-    const tpl = await templates.get(req.params.id);
-    if (!tpl) {
-      res.status(404).json({ error: 'template not found' });
-      return;
-    }
-    res.json(tpl);
-  });
+    // OnlyOffice callback: acknowledges save/status changes. We don't persist
+    // edits from the viewer by default, so just return { error: 0 }.
+    app.post('/api/files/onlyoffice/callback', (req, res) => {
+      const c = parseOnlyOfficeCallback(req.body);
+      // status: 2 = document ready to download (i.e. saved). Since we are
+      // view-only this is harmless; log it for traceability.
+      logAudit(req, { action: 'onlyoffice.callback', detail: `status=${c.status} key=${c.key ?? ''}` });
+      res.json({ error: 0 });
+    });
 
-  const validateTemplateInput = (body: unknown): { ok: true; value: TemplateInput } | { ok: false; error: string } => {
-    const b = (body ?? {}) as Partial<TemplateInput>;
-    if (typeof b.name !== 'string' || !b.name.trim()) return { ok: false, error: 'name is required' };
-    const fmt = b.format;
-    if (!fmt || !SUPPORTED_FORMATS.includes(fmt)) {
-      return { ok: false, error: `unsupported format '${fmt}'. Supported: ${SUPPORTED_FORMATS.join(', ')}` };
-    }
-    const schema = FORMAT_SCHEMAS[fmt];
-    const parsed = schema.safeParse(b.input ?? {});
-    if (!parsed.success) {
-      return { ok: false, error: `input is invalid: ${formatIssueSummary(parsed.error)}` };
-    }
-    return {
-      ok: true,
-      value: {
-        name: b.name.trim(),
-        format: fmt,
-        description: typeof b.description === 'string' ? b.description : undefined,
-        styleTemplateId: typeof b.styleTemplateId === 'string' && b.styleTemplateId ? b.styleTemplateId : undefined,
-        input: parsed.data as TemplateInput['input'],
-      },
-    };
-  };
-
-  app.post('/api/templates', auth.requireAdmin, async (req, res) => {
-    const check = validateTemplateInput(req.body);
-    if (!check.ok) {
-      res.status(422).json({ error: check.error });
-      return;
-    }
-    try {
-      const tpl = await templates.create(check.value);
-      logAudit(req, { action: 'template.create', target: tpl.id, detail: `${tpl.name} (${tpl.format})` });
-      res.status(201).json(tpl);
-    } catch (err) {
-      res.status(500).json({ error: resolveError(err) });
-    }
-  });
-
-  app.put('/api/templates/:id', auth.requireAdmin, async (req, res) => {
-    const existing = await templates.get(req.params.id);
-    if (!existing) {
-      res.status(404).json({ error: 'template not found' });
-      return;
-    }
-    const check = validateTemplateInput({ ...existing, ...(req.body ?? {}) });
-    if (!check.ok) {
-      res.status(422).json({ error: check.error });
-      return;
-    }
-    try {
-      const tpl = await templates.update(req.params.id, check.value);
-      logAudit(req, { action: 'template.update', target: tpl?.id ?? req.params.id, detail: tpl ? `${tpl.name} (${tpl.format})` : undefined });
-      res.json(tpl);
-    } catch (err) {
-      res.status(500).json({ error: resolveError(err) });
-    }
-  });
-
-  app.delete('/api/templates/:id', auth.requireAdmin, async (req, res) => {
-    const ok = await templates.remove(req.params.id);
-    if (!ok) {
-      res.status(404).json({ error: 'template not found' });
-      return;
-    }
-    logAudit(req, { action: 'template.delete', target: req.params.id });
-    res.json({ ok: true, id: req.params.id });
-  });
+    // Generate the OnlyOffice editor config for a stored file (requires login).
+    app.post('/api/onlyoffice/config', auth.requireAuth, async (req, res) => {
+      const b = (req.body ?? {}) as { key?: unknown; title?: unknown; mode?: unknown };
+      const key = typeof b.key === 'string' ? b.key.trim() : '';
+      const title = typeof b.title === 'string' ? b.title.trim() : (key.split('/').pop() ?? '文档');
+      const mode = b.mode === 'edit' ? 'edit' : 'view';
+      if (!key) { res.status(400).json({ error: 'file key is required' }); return; }
+      if (!req.user || (!isAdmin(req) && !fileBelongsToUser(key, req.user.username))) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+      }
+      const fmt = formatFromKey(key);
+      if (!fmt || fmt === 'pdf') { res.status(400).json({ error: 'OnlyOffice preview supports docx/xlsx/pptx' }); return; }
+      const fileType = (key.split('.').pop() ?? '').toLowerCase();
+      const base = onlyOffice.publicBaseUrl;
+      const docUrl = base + signFileUrl(onlyOffice, key);
+      const cbUrl = base + `/api/files/onlyoffice/callback?k=${encodeURIComponent(key)}`;
+      const cfg = await buildOnlyOfficeConfig(onlyOffice, {
+        fileKey: Buffer.from(key).toString('base64url').slice(0, 120), // onlyoffice key: max 128 chars
+        fileType,
+        title,
+        documentUrl: docUrl,
+        callbackUrl: cbUrl,
+        mode,
+        user: { id: req.user.username, name: req.user.name ?? req.user.username },
+      });
+      res.json({ ...cfg, serverUrl: onlyOffice.serverUrl });
+    });
+  }
 
   // ---- style templates (per-user: system templates are read-only for users) ----
   app.get('/api/style-templates', auth.requireAuth, async (req, res) => {
@@ -463,6 +449,17 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
         return;
       }
       const target = isAdmin(req) ? SYSTEM_OWNER : req.user!.username;
+      // When an admin sets a system default on a non-system template (e.g. one
+      // they just uploaded), promote it to 'system' first so the default can
+      // legally reference it (system defaults may only reference system
+      // templates — this also makes it visible to every user).
+      if (target === SYSTEM_OWNER && id) {
+        const meta = await styleTemplates.get(id);
+        if (meta && meta.owner !== SYSTEM_OWNER) {
+          await styleTemplates.setOwner(id, SYSTEM_OWNER);
+          logAudit(req, { action: 'styletemplate.promote', target: id, detail: `${meta.name} (${meta.format}) -> system` });
+        }
+      }
       const updated = await styleTemplates.setDefaultFor(format as 'pptx' | 'docx' | 'xlsx', id, target);
       logAudit(req, { action: 'styletemplate.default', target: `format:${format}`, detail: `template=${id || '(none)'} scope=${target}` });
       res.json({ defaults: updated, effective: await styleTemplates.resolveDefault(format as 'pptx' | 'docx' | 'xlsx', target) });
@@ -527,40 +524,63 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
     }
   });
 
+  // ---- serve a style template's raw file (preview inline / download) ----
+  // Visibility mirrors list(scope): admins see every template; a normal user
+  // sees the system templates plus their own.
+  app.get('/api/style-templates/:id/content', auth.requireAuth, async (req, res) => {
+    try {
+      if (!req.user) return;
+      const meta = await styleTemplates.get(req.params.id);
+      if (!meta) {
+        res.status(404).json({ error: 'style template not found' });
+        return;
+      }
+      if (!isAdmin(req) && meta.owner !== SYSTEM_OWNER && meta.owner !== req.user.username) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+      }
+      const disposition = req.query.disposition === 'attachment' ? 'attachment' : 'inline';
+      if (disposition === 'attachment') {
+        logAudit(req, { action: 'styletemplate.download', target: meta.id, detail: meta.name });
+      }
+      res.setHeader('Content-Type', meta.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(meta.filename || meta.name)}`);
+      res.setHeader('Content-Length', meta.buffer.length);
+      res.send(meta.buffer);
+    } catch (err) {
+      res.status(500).json({ error: resolveError(err) });
+    }
+  });
+
   // ---- generation (results always owned by the logged-in user) ----
   app.post('/api/generate', auth.requireAuth, async (req, res) => {
     if (!req.user) return;
-    const b = (req.body ?? {}) as { templateId?: string; styleTemplateId?: string; filename?: string; format?: DocFormat; input?: unknown };
-    let format: DocFormat;
-    let input: unknown;
-    let styleTemplateId: string | undefined;
-    if (b.templateId) {
-      const tpl = await templates.get(b.templateId);
-      if (!tpl) {
-        res.status(404).json({ error: 'template not found' });
-        return;
-      }
-      format = tpl.format;
-      input = tpl.input;
-      styleTemplateId = b.styleTemplateId;
-    } else {
-      if (!b.format || !SUPPORTED_FORMATS.includes(b.format)) {
-        res.status(400).json({ error: `unsupported format '${b.format}'. Supported: ${SUPPORTED_FORMATS.join(', ')}` });
-        return;
-      }
-      format = b.format;
-      input = b.input;
-      styleTemplateId = b.styleTemplateId;
+    const b = (req.body ?? {}) as { format?: DocFormat; filename?: string; title?: string; content?: string; author?: string; subject?: string; footer?: string; styleTemplateId?: string };
+    if (!b.format || !SUPPORTED_FORMATS.includes(b.format)) {
+      res.status(400).json({ error: `unsupported format '${b.format}'. Supported: ${SUPPORTED_FORMATS.join(', ')}` });
+      return;
     }
+    const format = b.format;
+    // The caller identity comes from the session; the rest maps onto the same
+    // Markdown-driven schema the public REST / MCP endpoints use, so the admin
+    // UI generates documents with exactly the same inputs as AI agents.
+    const input: Record<string, unknown> = { username: req.user.username, filename: b.filename };
+    if (b.title !== undefined) input.title = b.title;
+    if (b.content !== undefined) input.content = b.content;
+    if (b.author !== undefined) input.author = b.author;
+    if (b.subject !== undefined) input.subject = b.subject;
+    if (b.footer !== undefined) input.footer = b.footer;
+    if (b.styleTemplateId) input.styleTemplateId = b.styleTemplateId;
     const parsed = FORMAT_SCHEMAS[format].safeParse(input);
     if (!parsed.success) {
       res.status(422).json({ error: 'Validation failed', details: parsed.error.flatten() });
       return;
     }
+    const data = parsed.data as Record<string, unknown>;
     try {
-      const doc = await service.generate(format, parsed.data as never, {
-        styleTemplateId,
-        filename: b.filename,
+      const doc = await service.generate(format, data as never, {
+        styleTemplateId: typeof data.styleTemplateId === 'string' ? data.styleTemplateId : undefined,
+        filename: typeof data.filename === 'string' ? data.filename : undefined,
         owner: req.user.username,
         role: req.user.role,
       });
@@ -616,8 +636,4 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
   });
 
   return app;
-}
-
-function formatIssueSummary(err: { issues: { path: (string | number)[]; message: string }[] }): string {
-  return err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).slice(0, 5).join('; ');
 }

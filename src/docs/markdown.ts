@@ -30,8 +30,31 @@ type Block =
   | { kind: 'heading'; level: number; text: string }
   | { kind: 'list'; items: string[] }
   | { kind: 'table'; rows: string[][] }
-  | { kind: 'image'; alt: string; url: string }
+  | { kind: 'image'; alt: string; url: string; cell?: { col: number; row: number }; position?: { x: number; y: number; w?: number; h?: number } }
   | { kind: 'para'; text: string };
+
+/** Parse an optional `{ ... }` attribute list trailing an image line:
+ *  `![alt](url){cell:col,row}`  (Excel: anchor to a cell)
+ *  `![alt](url){x:80,y:40,w:200,h:100}`  (Excel/PPT: absolute px position) */
+function parseImageOptions(raw?: string): { cell?: { col: number; row: number }; position?: { x: number; y: number; w?: number; h?: number } } {
+  if (!raw) return {};
+  let s = raw.trim();
+  if (s.startsWith('{')) s = s.slice(1);
+  if (s.endsWith('}')) s = s.slice(0, -1);
+  s = s.trim();
+  if (!s) return {};
+  const cellM = /^cell\s*:\s*(\d+)\s*,\s*(\d+)$/i.exec(s);
+  if (cellM) return { cell: { col: parseInt(cellM[1], 10), row: parseInt(cellM[2], 10) } };
+  const pos: { x?: number; y?: number; w?: number; h?: number } = {};
+  for (const pair of s.split(',')) {
+    const m = /^\s*([xywh])\s*:\s*(\d+)\s*$/i.exec(pair);
+    if (m) pos[m[1].toLowerCase() as 'x' | 'y' | 'w' | 'h'] = parseInt(m[2], 10);
+  }
+  if (pos.x !== undefined || pos.y !== undefined) {
+    return { position: { x: pos.x ?? 0, y: pos.y ?? 0, w: pos.w, h: pos.h } };
+  }
+  return {};
+}
 
 function parseBlocks(md: string): Block[] {
   const lines = md.split(/\r?\n/);
@@ -47,8 +70,11 @@ function parseBlocks(md: string): Block[] {
     if (h) { blocks.push({ kind: 'heading', level: h[1].length, text: cleanInline(h[2]) }); i++; continue; }
 
     // image
-    const img = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
-    if (img) { blocks.push({ kind: 'image', alt: img[1], url: img[2] }); i++; continue; }
+    const img = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*(\{[^}]*\})?\s*$/);
+    if (img) {
+      blocks.push({ kind: 'image', alt: img[1], url: img[2], ...parseImageOptions(img[3]) });
+      i++; continue;
+    }
 
     // list (consecutive)
     if (/^([-*]|\d+\.)\s+/.test(trimmed)) {
@@ -85,7 +111,7 @@ function parseBlocks(md: string): Block[] {
     while (i < lines.length) {
       const t = lines[i].trim();
       if (!t) { i++; break; }
-      if (/^(#{1,6})\s+/.test(t) || /^([-*]|\d+\.)\s+/.test(t) || /^\|/.test(t) || /^!\[[^\]]*\]\([^)]+\)\s*$/.test(t)) break;
+      if (/^(#{1,6})\s+/.test(t) || /^([-*]|\d+\.)\s+/.test(t) || /^\|/.test(t) || /^!\[[^\]]*\]\([^)]+\)\s*(\{[^}]*\})?\s*$/.test(t)) break;
       para.push(cleanInline(t));
       i++;
     }
@@ -134,7 +160,7 @@ export function markdownToDocx(md: string): DocxInput {
     else if (b.kind === 'list') b.items.forEach((it) => out.paragraphs!.push({ text: cleanInline(it), bullet: true }));
     else if (b.kind === 'para') { const p = paraItem(b.text); if (p.text) out.paragraphs!.push(p); }
     else if (b.kind === 'table') out.tables!.push(tableToData(b.rows));
-    else if (b.kind === 'image') out.images!.push(imageItem(b.url, b.alt));
+    else if (b.kind === 'image') out.images!.push(imageItem(b.url, b.alt, { cell: b.cell, position: b.position }));
   }
   if (!out.title) out.title = firstHeading(md);
   return out;
@@ -150,16 +176,21 @@ export function markdownToXlsx(md: string): XlsxInput {
   const sheets: SheetData[] = [];
   let currentName = 'Sheet1';
   let pendingRows: string[][] | null = null;
+  let pendingImages: ImageItem[] = [];
   const flushSheet = () => {
     if (pendingRows && pendingRows.length) {
-      sheets.push({ name: currentName, rows: tableToData(pendingRows).rows.map((row) => row) });
+      const sheet: SheetData = { name: currentName, rows: tableToData(pendingRows).rows.map((row) => row) };
+      if (pendingImages.length) sheet.images = pendingImages;
+      sheets.push(sheet);
     }
     pendingRows = null;
+    pendingImages = [];
   };
   for (const b of blocks) {
     if (b.kind === 'heading') { flushSheet(); currentName = cleanInline(b.text) || currentName; }
     else if (b.kind === 'table') { pendingRows = b.rows; }
-    else if (b.kind === 'list' || b.kind === 'para' || b.kind === 'image') { flushSheet(); }
+    else if (b.kind === 'image') { pendingImages.push(imageItem(b.url, b.alt, { cell: b.cell, position: b.position })); }
+    else if (b.kind === 'list' || b.kind === 'para') { flushSheet(); }
   }
   flushSheet();
   if (!sheets.length && parseBlocks(md).some((b) => b.kind === 'table')) {
@@ -179,17 +210,25 @@ export function markdownToPptx(md: string): PptxInput {
     if (b.kind === 'heading') { flush(); cur = { title: cleanInline(b.text), bullets: [], tables: [], layout: 'title_content' }; }
     else if (b.kind === 'list') { if (cur) (cur.bullets! = cur.bullets!.concat(b.items.map((it) => cleanInline(it)))); else { cur = { bullets: [], layout: 'title_content' }; cur.bullets!.push(...b.items); } }
     else if (b.kind === 'table') { if (cur) cur.tables!.push(tableToData(b.rows)); }
-    else if (b.kind === 'para' || b.kind === 'image') { /* 正文段落相对降级：跳过或并入 */ }
+    else if (b.kind === 'image') { if (cur) cur.images = (cur.images || []).concat([imageItem(b.url, b.alt, { cell: b.cell, position: b.position })]); }
+    else if (b.kind === 'para') { /* 正文段落相对降级：跳过 */ }
   }
   flush();
   if (!slides.length) slides.push({ title: firstHeading(md), bullets: [], layout: 'title_content' });
   return { title: firstHeading(md) || '', slides };
 }
 
-function imageItem(url: string, alt: string): ImageItem {
+function imageItem(
+  url: string,
+  alt: string,
+  opts?: { cell?: { col: number; row: number }; position?: { x: number; y: number; w?: number; h?: number } },
+): ImageItem {
   const u = url.trim();
   const isData = /^data:/i.test(u);
-  return isData ? { data: u, caption: alt || undefined } : { url: u, caption: alt || undefined };
+  const base: ImageItem = isData ? { data: u, caption: alt || undefined } : { url: u, caption: alt || undefined };
+  if (opts?.cell) base.cell = opts.cell;
+  if (opts?.position) base.position = opts.position;
+  return base;
 }
 
 export function inlineRender(s: string): { text: string; bold?: boolean; italic?: boolean } {

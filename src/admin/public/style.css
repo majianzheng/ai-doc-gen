@@ -341,7 +341,7 @@ body.sidebar-collapsed .main { margin-left: 0; }
 }
 
 /* ================= table ================= */
-.table-scroll { overflow-x: auto; }
+.table-scroll { overflow: auto; max-height: 66vh; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td {
   text-align: left;
@@ -355,12 +355,28 @@ body.sidebar-collapsed .main { margin-left: 0; }
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.3px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .table td { font-size: 13px; }
 .table tr:last-child td { border-bottom: none; }
 .table tbody tr { transition: background var(--transition); }
 .table tbody tr:hover { background: var(--card-soft); }
 .th-right, .td-right { text-align: right; }
+
+/* Long-text columns wrap instead of forcing the table wider than its
+   container, so tables scroll inside their own box (no whole-page overflow). */
+#fileTable th:nth-child(1), #fileTable td:nth-child(1),
+#auditTable th:nth-child(4), #auditTable td:nth-child(4),
+#auditTable th:nth-child(5), #auditTable td:nth-child(5),
+#styleTable th:nth-child(1), #styleTable td:nth-child(1),
+#styleTable th:nth-child(4), #styleTable td:nth-child(4),
+#userTable th:nth-child(2), #userTable td:nth-child(2) {
+  white-space: normal;
+  word-break: break-word;
+  min-width: 160px;
+}
 
 /* ================= badges ================= */
 .pill {
@@ -975,3 +991,17 @@ body.sidebar-collapsed .main { margin-left: 0; }
   font-size: 12.5px; color: var(--text-2); cursor: pointer;
 }
 
+
+/* ============ �������� ============ */
+.gen-form { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.form-grid.gen-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 18px; padding: 0; }
+.gen-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+/* Result download button: the generic .result a color rule must not override
+   the .btn label, and primary buttons need stronger contrast in dark mode. */
+.result .result-links a.btn { text-decoration: none; }
+.result .result-links a.btn-primary { color: #fff; }
+[data-theme="dark"] .btn-primary { background: #5b63d9; border-color: #5b63d9; }
+[data-theme="dark"] .btn-primary:hover { background: #6a72e8; }
+[data-theme="dark"] .btn-accent { background: #168a67; border-color: #168a67; }
+[data-theme="dark"] .btn-accent:hover { background: #1da678; }

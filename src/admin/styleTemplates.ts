@@ -185,6 +185,22 @@ export class StyleTemplateStore {
     return meta;
   }
 
+  /** Reassign the owner of an existing template (used to promote a template
+   *  to 'system' when an admin sets it as the system default). The binary file
+   *  is untouched; only the metadata owner changes. */
+  async setOwner(id: string, owner: string): Promise<StyleTemplateMeta | null> {
+    if (!this.isSafeId(id)) return null;
+    try {
+      const meta = JSON.parse(await readFile(join(this.dir, `${id}.json`), 'utf8')) as StyleTemplateMeta;
+      if (typeof meta.owner !== 'string' || !meta.owner) meta.owner = SYSTEM_OWNER;
+      meta.owner = owner;
+      await writeFile(join(this.dir, `${id}.json`), JSON.stringify(meta, null, 2), 'utf8');
+      return meta;
+    } catch {
+      return null;
+    }
+  }
+
   async remove(id: string): Promise<boolean> {
     if (!this.isSafeId(id)) return false;
     try {

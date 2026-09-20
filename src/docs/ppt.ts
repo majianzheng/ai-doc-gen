@@ -158,6 +158,23 @@ async function addSlideImages(
       mime = 'image/png';
     }
     const intrinsic = intrinsicSize(buffer, 'png');
+
+    const dataUri = `data:${mime};base64,` + buffer.toString('base64');
+
+    // Explicit position (px, 96px = 1in) wins: place the image at an exact spot
+    // with explicit size instead of auto-laying it out below the text.
+    if (img.position) {
+      const wIn = (img.position.w ?? computeSize({ width: resolvedRaw.width, height: resolvedRaw.height }, intrinsic, 320).width) / 96;
+      const hIn = (img.position.h ?? computeSize({ width: resolvedRaw.width, height: resolvedRaw.height }, intrinsic, 320).height) / 96;
+      const x = img.position.x / 96;
+      const y = img.position.y / 96;
+      s.addImage({ data: dataUri, x, y, w: Math.round(wIn * 100) / 100, h: Math.round(hIn * 100) / 100 });
+      if (resolvedRaw.caption) {
+        s.addText(resolvedRaw.caption, { x, y: y + hIn + 0.05, w: wIn, h: 0.3, fontSize: 10, italic: false, color: c.subtle ?? '999999', align: 'center' });
+      }
+      continue;
+    }
+
     const sizePx = computeSize({ width: resolvedRaw.width, height: resolvedRaw.height }, intrinsic, 320);
     let wIn = sizePx.width / 96;
     let hIn = sizePx.height / 96;
@@ -170,8 +187,6 @@ async function addSlideImages(
     let x = 0.6;
     if (resolvedRaw.align === 'center') x = (13.33 - wIn) / 2;
     else if (resolvedRaw.align === 'right') x = 13.33 - 0.6 - wIn;
-
-    const dataUri = `data:${mime};base64,` + buffer.toString('base64');
 
     s.addImage({ data: dataUri, x, y, w: Math.round(wIn * 100) / 100, h: Math.round(hIn * 100) / 100 });
     y += slot;

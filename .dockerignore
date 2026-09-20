@@ -1,12 +1,12 @@
 # docker ignore for ai-doc
 node_modules
-dist
 storage
 .git
 .env
 *.log
 README.md
 .dify
+web/public
 
 # lockfiles (not needed for the Docker build context)
 package-lock.json

@@ -9,7 +9,7 @@ const I18N = {
     'brand.sub': '文档生成管理后台',
     'nav.group': '导航',
     'nav.files': '生成文件',
-    'nav.templates': '内容模板',
+    'nav.templates': '在线生成',
     'nav.styles': '样式模板',
     'footer.preferences': '偏好设置',
     'footer.theme': '主题',
@@ -24,7 +24,29 @@ const I18N = {
     'meta.offline': '后台状态:异常',
     'meta.connectFail': '无法连接后台: {msg}',
     'page.files': '生成文件',
-    'page.templates': '内容模板',
+    'page.templates': '在线生成',
+    'gen.title': '在线生成',
+    'gen.subtitle': '输入 Markdown 内容，一键生成 Word / PDF / Excel / PPT 文档',
+    'gen.format': '文档格式',
+    'gen.titlePlaceholder': '（可选）文档标题',
+    'gen.filename': '文件名（不含扩展名）',
+    'gen.filenamePlaceholder': '如 Q3经营报告、2025年度总结',
+    'gen.style': '套用样式模板',
+    'gen.example': '载入示例',
+    'gen.clear': '清空',
+    'gen.contentLabel': 'Markdown 内容',
+    'gen.generate': '生成文档',
+    'gen.generating': '生成中…',
+    'gen.genOk': '生成成功',
+    'gen.genFailed': '生成失败',
+    'gen.genTitleOk': '生成成功：{fmt}',
+    'gen.genName': '文件名：{name} ｜ 大小：{size}',
+    'gen.genLink': '链接：',
+    'gen.genDownload': '下载',
+    'gen.preview': '预览',
+    'gen.genTitleErr': '生成失败',
+    'gen.contentRequired': '请输入 Markdown 内容',
+    'gen.filenameRequired': '请输入文件名',
     'page.styles': '样式模板',
     'files.title': '生成的文档',
     'files.subtitle': '在页面上直接预览或下载已生成的文档',
@@ -80,6 +102,8 @@ const I18N = {
     'audit.act.template.delete': '删除模板',
     'audit.act.styletemplate.upload': '上传样式模板',
     'audit.act.styletemplate.delete': '删除样式模板',
+    'audit.act.styletemplate.download': '下载样式模板',
+    'audit.act.styletemplate.promote': '提升为系统模板',
     'audit.act.styletemplate.default': '设置默认样式模板',
     'audit.act.user.create': '创建用户',
     'audit.act.user.delete': '删除用户',
@@ -151,6 +175,8 @@ const I18N = {
     'styles.col.filename': '文件名',
     'styles.col.size': '大小',
     'styles.col.actions': '操作',
+    'styles.preview': '预览',
+    'styles.download': '下载',
     'styles.current': '← 当前使用',
     'styles.setCurrent': '设为当前',
     'styles.setSystemDefault': '设为系统默认',
@@ -296,7 +322,7 @@ const I18N = {
     'brand.sub': 'Document Generation Console',
     'nav.group': 'Navigation',
     'nav.files': 'Generated Files',
-    'nav.templates': 'Content Templates',
+    'nav.templates': 'Generate Online',
     'nav.styles': 'Style Templates',
     'footer.preferences': 'Preferences',
     'footer.theme': 'Theme',
@@ -311,7 +337,29 @@ const I18N = {
     'meta.offline': 'Backend offline',
     'meta.connectFail': 'Cannot reach backend: {msg}',
     'page.files': 'Generated Files',
-    'page.templates': 'Content Templates',
+    'page.templates': 'Generate Online',
+    'gen.title': 'Generate Online',
+    'gen.subtitle': 'Write Markdown and generate Word / PDF / Excel / PPT in one click',
+    'gen.format': 'Format',
+    'gen.titlePlaceholder': '(optional) Document title',
+    'gen.filename': 'File name (no extension)',
+    'gen.filenamePlaceholder': 'e.g. Q3 report, 2025 summary',
+    'gen.style': 'Apply style template',
+    'gen.example': 'Load Example',
+    'gen.clear': 'Clear',
+    'gen.contentLabel': 'Markdown content',
+    'gen.generate': 'Generate',
+    'gen.generating': 'Generating…',
+    'gen.genOk': 'Generated',
+    'gen.genFailed': 'Generation failed',
+    'gen.genTitleOk': 'Generated: {fmt}',
+    'gen.genName': 'File: {name} ｜ Size: {size}',
+    'gen.genLink': 'Link:',
+    'gen.genDownload': 'Download',
+    'gen.preview': 'Preview',
+    'gen.genTitleErr': 'Generation failed',
+    'gen.contentRequired': 'Please enter Markdown content',
+    'gen.filenameRequired': 'Please enter a file name',
     'page.styles': 'Style Templates',
     'files.title': 'Generated Documents',
     'files.subtitle': 'Preview or download generated documents right in the page',
@@ -367,6 +415,8 @@ const I18N = {
     'audit.act.template.delete': 'Delete template',
     'audit.act.styletemplate.upload': 'Upload style template',
     'audit.act.styletemplate.delete': 'Delete style template',
+    'audit.act.styletemplate.download': 'Download style template',
+    'audit.act.styletemplate.promote': 'Promote to system template',
     'audit.act.styletemplate.default': 'Set default style template',
     'audit.act.user.create': 'Create user',
     'audit.act.user.delete': 'Delete user',
@@ -438,6 +488,8 @@ const I18N = {
     'styles.col.filename': 'File Name',
     'styles.col.size': 'Size',
     'styles.col.actions': 'Actions',
+    'styles.preview': 'Preview',
+    'styles.download': 'Download',
     'styles.current': '← In use',
     'styles.setCurrent': 'Make default',
     'styles.setSystemDefault': 'Set as system default',
@@ -625,12 +677,10 @@ const state = {
   filesPage: { page: 1, limit: 20, total: 0, pages: 1, owners: [] },
   audit: [],
   auditPage: { page: 1, limit: 20, total: 0, pages: 1, actions: [] },
-  templates: [],
   styleTemplates: [],
   styleDefaults: {},
   styleSystemDefaults: {},
   styleOwnDefaults: {},
-  currentTemplateId: null,
   preview: null,
   user: null,
   ssoStatus: null,
@@ -641,66 +691,95 @@ const isAdminUser = () => !!(state.user && state.user.role === 'admin');
 
 const $ = (sel) => document.querySelector(sel);
 
+const IMG_B64 = 'PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc0MDAnIGhlaWdodD0nMTIwJyB2aWV3Qm94PScwIDAgNDAwIDEyMCc+PHJlY3Qgd2lkdGg9JzQwMCcgaGVpZ2h0PScxMjAnIHJ4PScxMicgZmlsbD0nIzJiM2E4ZicvPjx0ZXh0IHg9JzIwMCcgeT0nNzInIGZvbnQtZmFtaWx5PSdBcmlhbCcgZm9udC1zaXplPSczNCcgZmlsbD0nI2ZmZmZmZicgdGV4dC1hbmNob3I9J21pZGRsZSc+QUktRG9jPC90ZXh0Pjwvc3ZnPg==';
+const IMG_MD = (alt) => `![${alt}](data:image/svg+xml;base64,${IMG_B64})`;
+
 const EXAMPLES = {
-  docx: {
-    title: '工作周报',
-    author: '示例用户',
-    paragraphs: [
-      { text: '本周完成事项', level: 1 },
-      { text: '完成 AI 文档生成平台的部署与联调', bullet: true },
-      { text: '修复导出 PDF 的排版问题', bullet: true },
-      { text: '下周计划', level: 1 },
-      { text: '接入 Dify 工作流,并完善模板库', bullet: true },
-    ],
-    footer: '由 AI-Doc 生成',
-  },
-  pdf: {
-    title: '项目汇报',
-    author: '示例用户',
-    paragraphs: [
-      { text: '项目概述', level: 1 },
-      { text: '本项目通过 MCP 协议为 AI Agent 提供文档生成能力。' },
-      { text: '交付指标', level: 1 },
-    ],
-    tables: [
-      {
-        columns: [
-          { key: 'item', header: '指标' },
-          { key: 'value', header: '目标' },
-        ],
-        rows: [
-          { item: '文档格式', value: 'docx / pdf / xlsx / pptx' },
-          { item: '上线日期', value: '2026-09-01' },
-        ],
-      },
-    ],
-  },
-  xlsx: {
-    title: '月度销售数据',
-    sheets: [
-      {
-        name: '销售明细',
-        columns: [
-          { key: 'month', header: '月份' },
-          { key: 'revenue', header: '收入(元)' },
-          { key: 'goal', header: '目标(元)' },
-        ],
-        rows: [
-          { month: '1月', revenue: 120000, goal: 100000 },
-          { month: '2月', revenue: 156000, goal: 110000 },
-        ],
-      },
-    ],
-  },
-  pptx: {
-    title: '项目启动会',
-    author: '示例用户',
-    slides: [
-      { title: '项目启动会', subtitle: 'AI-Doc 文档生成平台', layout: 'title' },
-      { title: '项目背景', bullets: ['统一文档生成能力', '向 AI Agent 开放能力'], layout: 'title_content' },
-      { title: '后续计划', bullets: ['MCP 接入', '模板定制与模板库建设'], layout: 'title_content' },
-    ],
-  },
+  docx: `# 工作周报
+
+本周完成了 AI 文档生成平台的部署与联调，核心聚焦在稳定性与使用体验的优化上。
+
+## 本周完成事项
+
+- 完成 AI 文档生成平台的部署与联调
+- 修复导出 PDF 的排版问题
+- 新增多格式模板与样式套用
+- 梳理并完善开放接口文档
+
+## 数据统计
+
+| 指标 | 本周 | 上周 |
+| --- | --- | --- |
+| 生成文档数 | 128 | 96 |
+| 平均耗时(秒) | 3.2 | 4.8 |
+
+${IMG_MD('数据与走势示意')}
+
+## 下周计划
+
+- 进一步优化生成速度
+- 增加更多行业模板
+- 完善在线生成界面
+`,
+  pdf: `# 项目汇报
+
+## 项目概述
+
+本项目为 AI Agent 提供统一的文档生成能力，覆盖 Word / PDF / Excel / PPT 四种格式。
+
+## 交付指标
+
+| 指标 | 目标 |
+| --- | --- |
+| 文档格式 | docx / pdf / xlsx / pptx |
+| 上线日期 | 2026-09-01 |
+
+${IMG_MD('整体架构示意')}
+
+## 风险与应对
+
+- 模板兼容性风险：已建立回归测试保障
+- 资源限制：采用按需加载与缓存
+`,
+  xlsx: `# 月度销售数据
+
+## 销售明细
+
+| 月份 | 收入(元) | 目标(元) |
+| --- | --- | --- |
+| 1月 | 120000 | 100000 |
+| 2月 | 156000 | 110000 |
+
+## 区域汇总
+
+| 区域 | 订单数 | 回款(元) |
+| --- | --- | --- |
+| 华东 | 240 | 480000 |
+| 华南 | 180 | 360000 |
+
+${IMG_MD('销售趋势示意')}
+`,
+  pptx: `# 项目启动会
+
+## 项目背景
+
+- 统一文档生成能力
+- 向 AI Agent 开放能力
+
+## 关键数据
+
+| 指标 | 现状 |
+| --- | --- |
+| 格式支持 | 4 种 |
+| 平均耗时 | 3 秒 |
+
+${IMG_MD('整体示意')}
+
+## 后续计划
+
+- 完善在线生成界面
+- 模板定制与模板库建设
+`,
 };
 
 const PAGES = { files: 'page.files', templates: 'page.templates', styles: 'page.styles', users: 'page.users', sso: 'page.sso', audit: 'page.audit' };
@@ -1122,7 +1201,6 @@ function applyI18nAll() {
   renderFiles();
   renderStyleOptions();
   renderStyleTemplates();
-  renderTemplateList();
   updateStyleCurrent();
   renderUsers();
   renderUserChip();
@@ -1145,7 +1223,7 @@ function switchTab(tab) {
   if (view) view.classList.add('active');
   setPageTitle(tab);
   if (tab === 'files') refreshFiles();
-  if (tab === 'templates') { refreshTemplates(); loadStyleOptions(); }
+  if (tab === 'templates') loadStyleOptions();
   if (tab === 'styles') refreshStyleTemplates();
   if (tab === 'users') refreshUsers();
   if (tab === 'sso') { refreshSsoStatus(); loadSsoConfig(); }
@@ -1169,8 +1247,10 @@ function renderMeta() {
 async function loadMeta() {
   try {
     state.meta = await api('/api/meta');
+    window.AIDocOnlyOffice = state.meta.onlyoffice || { enabled: false, serverUrl: '' };
     renderMeta();
   } catch (err) {
+    window.AIDocOnlyOffice = { enabled: false, serverUrl: '' };
     $('#metaStorage').textContent = t('meta.offline');
     toast(t('meta.connectFail', { msg: err.message }), 'err');
   }
@@ -1469,171 +1549,105 @@ async function deleteFile(file) {
 }
 
 /* ============================================================
-   Templates
+   Generate (online)
    ============================================================ */
-async function refreshTemplates() {
-  try {
-    state.templates = await api('/api/templates');
-    renderTemplateList();
-    if (state.currentTemplateId) {
-      const exists = state.templates.some((t) => t.id === state.currentTemplateId);
-      if (exists) selectTemplate(state.currentTemplateId);
-    }
-  } catch (err) {
-    toast(t('tpl.loadFailed', { msg: err.message }), 'err');
-  }
+function currentFormat() {
+  return $('#genFormat').value;
 }
 
-function renderTemplateList() {
-  const list = $('#tplList');
-  if (!list) return;
-  $('#tplEmpty').classList.toggle('hidden', state.templates.length > 0);
-  list.innerHTML = state.templates.map((tpl) => {
-    let sub = '<span>' + formatBadge(tpl.format) + '</span>';
-    if (tpl.description) sub += '<span class="tpl-item-desc">' + escapeHtml(tpl.description) + '</span>';
-    return '<li class="tpl-item ' + (tpl.id === state.currentTemplateId ? 'active' : '') + '" data-id="' + escapeAttr(tpl.id) + '">'
-      + '<div class="tpl-item-title">' + escapeHtml(tpl.name) + '</div>'
-      + '<div class="tpl-item-sub">' + sub + '</div>'
-      + '</li>';
-  }).join('');
-}
-
-function selectTemplate(id) {
-  state.currentTemplateId = id;
-  const tpl = state.templates.find((t) => t.id === id);
-  if (!tpl) return;
-  $('#tplName').value = tpl.name;
-  $('#tplDesc').value = tpl.description || '';
-  $('#tplFormat').value = tpl.format;
-  $('#tplInput').value = JSON.stringify(tpl.input, null, 2);
-  if (tpl.styleTemplateId) {
-    $('#tplStyle').value = tpl.styleTemplateId;
-  }
-  renderStyleOptions();
-  setStatus('');
-  clearResult();
-  renderTemplateList();
-}
-
-function newTemplate() {
-  state.currentTemplateId = null;
-  const fmt = $('#tplFormat').value;
-  $('#tplName').value = '';
-  $('#tplDesc').value = '';
-  $('#tplInput').value = JSON.stringify(EXAMPLES[fmt], null, 2);
-  $('#tplStyle').value = '';
-  renderStyleOptions();
-  setStatus(t('tpl.newStatus'));
-  clearResult();
-  renderTemplateList();
-}
-
-function currentInput() {
-  try {
-    return { ok: true, value: JSON.parse($('#tplInput').value) };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-}
-
-function setStatus(text, cls = '') {
-  const s = $('#tplStatus');
+function setGenStatus(text, cls = '') {
+  const s = $('#genStatus');
   if (!s) return;
   s.textContent = text;
   s.className = 'editor-status ' + cls;
 }
 
-function clearResult() {
-  const r = $('#tplResult');
+function clearGenResult() {
+  const r = $('#genResult');
   if (!r) return;
   r.classList.add('hidden');
   r.innerHTML = '';
 }
 
-async function saveTemplate() {
-  const parsed = currentInput();
-  if (!parsed.ok) { setStatus(t('tpl.jsonError', { msg: parsed.error }), 'err'); return; }
-  const styleTemplateId = $('#tplStyle').value || undefined;
-  const body = {
-    name: $('#tplName').value.trim() || t('tpl.namePlaceholder'),
-    format: $('#tplFormat').value,
-    description: $('#tplDesc').value.trim() || undefined,
-    styleTemplateId,
-    input: parsed.value,
-  };
-  try {
-    let tpl;
-    if (state.currentTemplateId) {
-      tpl = await api('/api/templates/' + state.currentTemplateId, { method: 'PUT', body });
-    } else {
-      tpl = await api('/api/templates', { method: 'POST', body });
-    }
-    state.currentTemplateId = tpl.id;
-    await refreshTemplates();
-    setStatus(t('tpl.saved'), 'ok');
-    toast(t('tpl.saveToast'), 'ok');
-  } catch (err) {
-    setStatus(err.message, 'err');
-    toast(t('tpl.saveFailed', { msg: err.message }), 'err');
-  }
-}
-
-async function deleteTemplate() {
-  if (!state.currentTemplateId) return;
-  if (!window.confirm(t('tpl.deleteConfirm'))) return;
-  try {
-    await api('/api/templates/' + state.currentTemplateId, { method: 'DELETE' });
-    state.currentTemplateId = null;
-    $('#tplName').value = '';
-    $('#tplDesc').value = '';
-    $('#tplInput').value = '';
-    setStatus('');
-    clearResult();
-    await refreshTemplates();
-    toast(t('tpl.deleted'), 'ok');
-  } catch (err) {
-    toast(t('tpl.deleteFailed', { msg: err.message }), 'err');
-  }
-}
-
-async function generateFromTemplate() {
-  const parsed = currentInput();
-  if (!parsed.ok) { setStatus(t('tpl.jsonError', { msg: parsed.error }), 'err'); return; }
-  const format = $('#tplFormat').value;
-  const styleTemplateId = $('#tplStyle').value || undefined;
-  const btn = $('#tplGenerate');
-  const prev = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner spinner-sm"></span><span>' + t('tpl.generating') + '</span>';
-  try {
-    const doc = await api('/api/generate', { method: 'POST', body: { format, input: parsed.value, styleTemplateId } });
-    showResult(doc);
-    setStatus(t('tpl.genOk'), 'ok');
-    refreshFiles();
-  } catch (err) {
-    showResult({ error: err.message, ok: false });
-    setStatus(t('tpl.genFailed'), 'err');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = prev;
-  }
-}
-
-function showResult(doc) {
-  const r = $('#tplResult');
+function showGenResult(doc) {
+  const r = $('#genResult');
   if (!r) return;
   r.classList.remove('hidden');
   if (doc.error) {
     r.className = 'result err';
-    r.innerHTML = '<div class="result-title">' + t('tpl.genTitleErr') + '</div><div>' + escapeHtml(doc.error) + '</div>';
+    r.innerHTML = '<div class="result-title">' + t('gen.genTitleErr') + '</div><div>' + escapeHtml(doc.error) + '</div>';
     return;
   }
   r.className = 'result';
   const name = doc.filename || '';
-  r.innerHTML = '<div class="result-title">' + t('tpl.genTitleOk', { fmt: doc.format ? ' ' + doc.format.toUpperCase() : '' }) + '</div>'
-    + '<div>' + t('tpl.genName', { name, size: fmtBytes(doc.size) }) + '</div>'
-    + '<div>' + t('tpl.genLink') + ' <a href="' + escapeAttr(doc.url) + '" target="_blank" rel="noopener">' + escapeHtml(doc.url) + '</a></div>'
-    + '<div class="result-links"><a class="btn btn-primary" href="' + escapeAttr(doc.downloadUrl || doc.url) + '" target="_blank" rel="noopener" download>' + t('tpl.genDownload') + '</a></div>';
+  const downloadUrl = genFileContentUrl(doc, 'attachment');
+  r.innerHTML = '<div class="result-title">' + t('gen.genTitleOk', { fmt: doc.format ? ' ' + doc.format.toUpperCase() : '' }) + '</div>'
+    + '<div>' + t('gen.genName', { name, size: fmtBytes(doc.size) }) + '</div>'
+    + '<div>' + t('gen.genLink') + ' <a href="' + escapeAttr(doc.url) + '" target="_blank" rel="noopener">' + escapeHtml(doc.url) + '</a></div>'
+    + '<div class="result-links">'
+    + '<button type="button" class="btn btn-accent result-preview">' + t('gen.preview') + '</button>'
+    + '<a class="btn btn-primary" href="' + escapeAttr(downloadUrl) + '" target="_blank" rel="noopener" download>' + t('gen.genDownload') + '</a>'
+    + '</div>';
+  const pbtn = r.querySelector('.result-preview');
+  if (pbtn) pbtn.addEventListener('click', () => openGenPreview(doc));
+}
+
+/** Same-origin file URL (authenticated) derived from the storage key, which
+ *  works for both local and S3 storage and always has the right disposition. */
+function genFileContentUrl(doc, disposition) {
+  if (!doc.storageKey) return doc.url;
+  return '/api/files/content?key=' + b64urlEncodeUTF8(doc.storageKey) + '&disposition=' + disposition;
+}
+
+function openGenPreview(doc) {
+  openPreview({
+    name: doc.filename,
+    format: doc.format,
+    size: doc.size,
+    lastModified: doc.createdAt,
+    key: doc.filename,
+    url: doc.url,
+    previewUrl: genFileContentUrl(doc, 'inline'),
+    downloadUrl: genFileContentUrl(doc, 'attachment'),
+  });
+}
+
+function loadGenExample() {
+  const fmt = currentFormat();
+  $('#genContent').value = EXAMPLES[fmt] || '';
+  setGenStatus(t('gen.example') + ' (' + fmt.toUpperCase() + ')');
+}
+
+function clearGen() {
+  $('#genContent').value = '';
+  setGenStatus('');
+  clearGenResult();
+}
+
+async function generateDoc() {
+  const format = currentFormat();
+  const content = $('#genContent').value.trim();
+  const title = $('#genTitle').value.trim();
+  const filename = $('#genFilename').value.trim();
+  const styleTemplateId = $('#genStyle').value || undefined;
+  if (!content) { setGenStatus(t('gen.contentRequired'), 'err'); return; }
+  if (!filename) { setGenStatus(t('gen.filenameRequired'), 'err'); return; }
+  const btn = $('#genSubmit');
+  const prev = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner spinner-sm"></span><span>' + t('gen.generating') + '</span>';
+  try {
+    const doc = await api('/api/generate', { method: 'POST', body: { format, title, filename, content, styleTemplateId } });
+    showGenResult(doc);
+    setGenStatus(t('gen.genOk'), 'ok');
+    refreshFiles();
+  } catch (err) {
+    showGenResult({ error: err.message, ok: false });
+    setGenStatus(t('gen.genFailed'), 'err');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = prev;
+  }
 }
 
 /* ============================================================
@@ -1663,7 +1677,7 @@ function renderStyleTemplates() {
   const rows = $('#styleRows');
   if (!rows) return;
   const list = state.styleTemplates || [];
-  const currentId = $('#tplStyle').value;
+  const currentId = $('#genStyle').value;
   $('#styleEmpty').classList.toggle('hidden', list.length > 0);
   rows.innerHTML = list.map((tpl) => {
     const editing = tpl.id === currentId ? ' <span class="badge-inuse">' + escapeHtml(t('styles.editing')) + '</span>' : '';
@@ -1682,6 +1696,8 @@ function renderStyleTemplates() {
     } else if (tpl.isSystemDefault) {
       currentCol = '<span class="badge-owner system" title="' + escapeAttr(t('styles.systemDefault')) + '">' + escapeHtml(t('styles.systemDefault')) + '</span>';
     }
+    const previewBtn = '<button class="icon-btn" data-act="preview" data-id="' + escapeAttr(tpl.id) + '">' + t('styles.preview') + '</button>';
+    const downloadBtn = '<button class="icon-btn" data-act="download" data-id="' + escapeAttr(tpl.id) + '">' + t('styles.download') + '</button>';
     const delBtn = tpl.manageable
       ? '<button class="icon-btn danger" data-act="delete" data-id="' + escapeAttr(tpl.id) + '">' + t('files.action.delete') + '</button>' : '';
     return '<tr>'
@@ -1690,7 +1706,7 @@ function renderStyleTemplates() {
       + '<td>' + currentCol + '</td>'
       + '<td title="' + escapeAttr(tpl.filename) + '">' + escapeHtml(tpl.filename) + '</td>'
       + '<td>' + fmtBytes(tpl.size) + ownerBadge + '</td>'
-      + '<td class="td-right">' + delBtn + '</td>'
+      + '<td class="td-right">' + previewBtn + downloadBtn + delBtn + '</td>'
       + '</tr>';
   }).join('');
 }
@@ -1711,9 +1727,9 @@ function detectStyleFormat(filename) {
 }
 
 function renderStyleOptions() {
-  const sel = $('#tplStyle');
+  const sel = $('#genStyle');
   if (!sel) return;
-  const fmt = $('#tplFormat').value;
+  const fmt = $('#genFormat').value;
   const list = (state.styleTemplates || []).filter((tpl) => tpl.format === fmt);
   const cur = sel.value;
   const defaults = state.styleDefaults || {};
@@ -1731,10 +1747,10 @@ function renderStyleOptions() {
 }
 
 function updateStyleCurrent() {
-  const el = $('#tplStyleCurrent');
+  const el = $('#genStyleCurrent');
   if (!el) return;
-  const sel = $('#tplStyle');
-  const fmt = $('#tplFormat').value;
+  const sel = $('#genStyle');
+  const fmt = $('#genFormat').value;
   const opt = sel.options[sel.selectedIndex];
   if (sel.value && opt) {
     el.textContent = t('tpl.styleApplied', { name: opt.text });
@@ -1815,9 +1831,37 @@ async function uploadStyleTemplate() {
   }
 }
 
+function styleTemplateContentUrl(id, disposition) {
+  return '/api/style-templates/' + encodeURIComponent(id) + '/content?disposition=' + disposition;
+}
+
+/** Open the shared preview modal for a style template (reuses the document
+ *  viewers bundle by mapping the template meta onto a preview file object). */
+function openStyleTemplatePreview(tpl) {
+  openPreview({
+    name: tpl.name || tpl.filename,
+    format: tpl.format,
+    size: tpl.size,
+    lastModified: tpl.createdAt,
+    key: tpl.filename || tpl.name,
+    url: styleTemplateContentUrl(tpl.id, 'attachment'),
+    previewUrl: styleTemplateContentUrl(tpl.id, 'inline'),
+    downloadUrl: styleTemplateContentUrl(tpl.id, 'attachment'),
+  });
+}
+
 async function styleTableClick(e) {
   const btn = e.target.closest('.icon-btn');
   if (!btn) return;
+  if (btn.dataset.act === 'preview') {
+    const tpl = (state.styleTemplates || []).find((t) => t.id === btn.dataset.id);
+    if (tpl) openStyleTemplatePreview(tpl);
+    return;
+  }
+  if (btn.dataset.act === 'download') {
+    window.open(styleTemplateContentUrl(btn.dataset.id, 'attachment'), '_blank');
+    return;
+  }
   if (btn.dataset.act === 'delete') {
     if (!window.confirm(t('styles.deleteConfirm'))) return;
     try {
@@ -1896,6 +1940,12 @@ function renderPreview(file, buf, opts) {
   content.innerHTML = '';
   const footer = $('#previewState');
   let metaHtml = '';
+
+  // OnlyOffice: render docx/xlsx/pptx in a true office engine when enabled.
+  if (window.AIDocOnlyOffice && window.AIDocOnlyOffice.enabled && ['docx', 'xlsx', 'pptx'].indexOf(file.format) > -1) {
+    renderOnlyOffice(file, content, footer);
+    return;
+  }
 
   if (!window.AIDocViewers || !window.AIDocViewers['render' + file.format.slice(0, 1).toUpperCase() + file.format.slice(1)]) {
     if (file.format === 'pdf') {
@@ -1994,8 +2044,57 @@ function openPreview(file) {
     });
 }
 
+// ---- OnlyOffice Document Server preview ----
+function renderOnlyOffice(file, content, footer) {
+  content.innerHTML = '';
+  const holder = document.createElement('div');
+  holder.id = 'onlyoffice-holder';
+  holder.style.width = '100%';
+  holder.style.height = '100%';
+  holder.style.minHeight = '600px';
+  content.appendChild(holder);
+  if (footer) footer.textContent = '';
+
+  fetch('/api/onlyoffice/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: file.key, title: file.name, mode: 'view' }),
+  })
+    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then((cfg) => {
+      if (!cfg || !cfg.serverUrl) throw new Error('OnlyOffice 未配置');
+      const serverUrl = cfg.serverUrl.replace(/\/+$/, '');
+      // load the OnlyOffice SDK once
+      const loadOo = () => new Promise((resolve, reject) => {
+        if (window.DocsAPI) { resolve(); return; }
+        const existing = document.querySelector('script[data-ooapi]');
+        if (existing) { existing.addEventListener('load', resolve, { once: true }); existing.addEventListener('error', reject, { once: true }); return; }
+        const s = document.createElement('script');
+        s.src = serverUrl + '/web-apps/apps/api/documents/api.js';
+        s.setAttribute('data-ooapi', '1');
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+      return loadOo().then(() => {
+        const config = { ...cfg.config, token: cfg.token };
+        if (state.preview && state.preview.ooEditor) {
+          try { state.preview.ooEditor.destroyEditor(); } catch { /* ignore */ }
+        }
+        state.preview.ooEditor = new window.DocsAPI.DocEditor('onlyoffice-holder', config);
+      });
+    })
+    .catch((err) => {
+      setPreviewStatus('error', t('preview.renderFail', { msg: err.message }));
+      holder.innerHTML = '';
+    });
+}
+
 function closePreview() {
   const content = $('#previewContent');
+  if (state.preview && state.preview.ooEditor) {
+    try { state.preview.ooEditor.destroyEditor(); } catch { /* ignore */ }
+    state.preview.ooEditor = null;
+  }
   content.innerHTML = '';
   $('#modal').classList.add('hidden');
   state.preview = null;
@@ -2068,36 +2167,11 @@ function bindEvents() {
   $('#auditNext').addEventListener('click', () => gotoAuditPage(state.auditPage.page + 1));
   $('#auditClear').addEventListener('click', clearAudit);
 
-  $('#tplNew').addEventListener('click', newTemplate);
-  $('#tplList').addEventListener('click', (e) => {
-    const item = e.target.closest('.tpl-item');
-    if (item) selectTemplate(item.dataset.id);
-  });
-  $('#tplSave').addEventListener('click', saveTemplate);
-  $('#tplDelete').addEventListener('click', deleteTemplate);
-  $('#tplGenerate').addEventListener('click', generateFromTemplate);
-  $('#tplValidate').addEventListener('click', () => {
-    const parsed = currentInput();
-    if (!parsed.ok) { setStatus(t('tpl.jsonError', { msg: parsed.error }), 'err'); return; }
-    setStatus(t('tpl.jsonOk'), 'ok');
-  });
-  $('#tplFormatJson').addEventListener('click', () => {
-    const parsed = currentInput();
-    if (!parsed.ok) { setStatus(t('tpl.jsonError', { msg: parsed.error }), 'err'); return; }
-    $('#tplInput').value = JSON.stringify(parsed.value, null, 2);
-    setStatus(t('tpl.formatted'), 'ok');
-  });
-  $('#tplExample').addEventListener('click', () => {
-    $('#tplInput').value = JSON.stringify(EXAMPLES[$('#tplFormat').value], null, 2);
-    setStatus(t('tpl.exampleLoaded'));
-  });
-  $('#tplFormat').addEventListener('change', () => {
-    if (!state.currentTemplateId && !$('#tplName').value.trim()) {
-      $('#tplInput').value = JSON.stringify(EXAMPLES[$('#tplFormat').value], null, 2);
-    }
-    renderStyleOptions();
-  });
-  $('#tplStyle').addEventListener('change', updateStyleCurrent);
+  $('#genSubmit').addEventListener('click', generateDoc);
+  $('#genExample').addEventListener('click', loadGenExample);
+  $('#genClear').addEventListener('click', clearGen);
+  $('#genFormat').addEventListener('change', renderStyleOptions);
+  $('#genStyle').addEventListener('change', updateStyleCurrent);
 
   $('#styleRefresh').addEventListener('click', refreshStyleTemplates);
   $('#styleUpload').addEventListener('click', uploadStyleTemplate);

@@ -5,9 +5,11 @@ import { markdownToXlsx } from './markdown.js';
 import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
 
 /**
- * Anchors images below the table data of a sheet. Excel stores images as
- * floating objects; width/height are given in pixels via the tl/ext anchor.
- * SVG input is rasterized to PNG (Excel cannot hold vector SVG as an image).
+ * Anchors images below the table data of a sheet, or at an explicit spot:
+ *  - `position` (px) -> floating at an absolute location (editAs=absolute)
+ *  - `cell` (0-based col/row) -> anchored to a cell so it moves with it (oneCell)
+ *  - otherwise -> stacked below the table rows.
+ * Excel stores images as floating objects; SVG input is rasterized to PNG.
  */
 async function writeSheetImages(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet, images: ImageItem[], dataRows: number): Promise<void> {
   let nextRow = dataRows + 3;
@@ -29,10 +31,30 @@ async function writeSheetImages(wb: ExcelJS.Workbook, ws: ExcelJS.Worksheet, ima
     const intrinsic = intrinsicSize(imgBuffer ?? resolved.buffer, ext);
     const size = computeSize({ width: resolved.width, height: resolved.height }, intrinsic, 260);
     const imageId = wb.addImage({ buffer: (imgBuffer ?? resolved.buffer) as never, extension: ext } as never);
+
+    if (img.position) {
+      // Floating at an absolute pixel location.
+      ws.addImage(imageId, {
+        tl: { x: img.position.x, y: img.position.y },
+        ext: { width: Math.round(img.position.w ?? size.width), height: Math.round(img.position.h ?? size.height) },
+        editAs: 'absolute',
+      } as never);
+      continue;
+    }
+    if (img.cell) {
+      // Anchored to a cell (0-based col/row) so it moves with the cell.
+      ws.addImage(imageId, {
+        tl: { col: img.cell.col, row: img.cell.row },
+        ext: { width: Math.round(size.width), height: Math.round(size.height) },
+        editAs: 'oneCell',
+      } as never);
+      continue;
+    }
+    // Default: stack below the table rows.
     ws.addImage(imageId, {
       tl: { col: 0, row: nextRow },
       ext: { width: Math.round(size.width), height: Math.round(size.height) },
-    });
+    } as never);
     nextRow += Math.ceil(size.height / 18) + 2;
   }
 }

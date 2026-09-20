@@ -36,6 +36,11 @@ services:
       S3_BUCKET: "${S3_BUCKET:-ai-doc}"
       S3_PATH_STYLE: "${S3_PATH_STYLE:-true}"
       S3_PUBLIC_BASE_URL: "${S3_PUBLIC_BASE_URL:-}"
+      # OnlyOffice Document Server integration (optional)
+      ONLYOFFICE_ENABLED: "${ONLYOFFICE_ENABLED:-false}"
+      ONLYOFFICE_SERVER_URL: "${ONLYOFFICE_SERVER_URL:-}"
+      ONLYOFFICE_SECRET: "${ONLYOFFICE_SECRET:-}"
+      ONLYOFFICE_PUBLIC_BASE_URL: "${ONLYOFFICE_PUBLIC_BASE_URL:-}"
     volumes:
       - ./storage:/app/storage
       - ./templates:/app/templates

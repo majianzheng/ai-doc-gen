@@ -69,8 +69,22 @@ const imageItem = z.object({
   svg: z.string().optional().describe('原始 SVG(XML) 标记'),
   width: z.number().positive().max(5000).optional().describe('渲染宽度(px)；省略按原始宽高比自适应'),
   height: z.number().positive().max(5000).optional().describe('渲染高度(px)；省略按原始宽高比自适应'),
-  align: z.enum(['left', 'center', 'right']).optional().describe('图片水平位置'),
+  align: z.enum(['left', 'center', 'right']).optional().describe('图片水平位置(自动布局时)'),
   caption: z.string().optional().describe('图片下方说明文字（题注）'),
+  cell: z.object({
+    col: z.number().int().min(0),
+    row: z.number().int().min(0),
+  }).optional().describe(
+    '（仅 Excel）把图片左上角锚定到某个单元格（col/row 从 0 开始），随该单元格移动；未提供 position 时生效。',
+  ),
+  position: z.object({
+    x: z.number().min(0).describe('左上角横坐标(px，96px=1in)'),
+    y: z.number().min(0).describe('左上角纵坐标(px)'),
+    w: z.number().positive().optional().describe('图片宽度(px)；省略按尺寸/比例推导'),
+    h: z.number().positive().optional().describe('图片高度(px)；省略按尺寸/比例推导'),
+  }).optional().describe(
+    '在页面/工作表任意位置绝对定位(px)。Excel 为浮动图片，PPT 指定该页图的左上角 x/y 与大小 w/h；提供时优先于 cell 与自动布局。',
+  ),
 }).refine((v) => [v.data, v.url, v.svg].filter((x) => x !== undefined).length <= 1, {
   message: '每张图片只能提供一种来源：data | url | svg',
 }).refine((v) => [v.data, v.url, v.svg].some((x) => x !== undefined), {

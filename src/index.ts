@@ -6,7 +6,6 @@ import { DocumentService } from './core.js';
 import { runMcpStdio } from './mcp/server.js';
 import { createHttpApp } from './http/server.js';
 import { createAdminApp } from './admin/server.js';
-import { TemplateStore } from './admin/templates.js';
 import { StyleTemplateStore, type StyleTemplateSeed } from './admin/styleTemplates.js';
 import { UserStore } from './admin/users.js';
 import { SessionManager, loadSessionSecret } from './admin/session.js';
@@ -41,10 +40,8 @@ async function seedDefaultStyleTemplates(styleTemplates: StyleTemplateStore): Pr
 async function main(): Promise<void> {
   const config = loadConfig();
   const storage = createStorage(config);
-  const templates = new TemplateStore(config.templateDir);
   const styleTemplates = new StyleTemplateStore(config.styleTemplateDir);
   const audit = new AuditLogStore(config.data.dir);
-  await templates.init();
   await styleTemplates.init();
   await audit.init();
   await seedDefaultStyleTemplates(styleTemplates);
@@ -79,7 +76,7 @@ async function main(): Promise<void> {
     const sessionSecret = await loadSessionSecret(config.data.dir, process.env.ADMIN_SESSION_SECRET);
     const accounts = new SessionManager(sessionSecret);
     const ssoConfig = new SsoConfigStore(config.data.dir);
-    const adminApp = createAdminApp({ config, service, storage, templates, styleTemplates, users, sessions: accounts, ssoConfigStore: ssoConfig, audit });
+    const adminApp = createAdminApp({ config, service, storage, styleTemplates, users, sessions: accounts, ssoConfigStore: ssoConfig, audit });
     adminApp.listen(config.admin.port, config.admin.host, () => {
       // eslint-disable-next-line no-console
       console.log(`[ai-doc] Admin UI: http://localhost:${config.admin.port}/  (port ${config.admin.port}, separated from the service port ${config.http.port})`);
