@@ -16,6 +16,11 @@ const loading = ref(false);
 
 function fmtTime(iso) { if (!iso) return '-'; return new Date(iso).toLocaleString(state.lang === 'zh-CN' ? 'zh-CN' : 'en-US', { hour12: false }); }
 
+function actionLabel(a) {
+  if (!a) return '-';
+  return t('audit.action.' + a);
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -59,7 +64,7 @@ onMounted(load);
         <el-input v-model="q" :placeholder="t('audit.search')" clearable style="width: 180px" />
         <el-input v-model="actor" :placeholder="t('audit.actor')" clearable style="width: 150px" />
         <el-select v-model="action" clearable :placeholder="t('audit.allActions')" style="width: 170px">
-          <el-option v-for="a in actions" :key="a" :value="a" :label="a" />
+          <el-option v-for="a in actions" :key="a" :value="a" :label="actionLabel(a)" />
         </el-select>
         <el-button @click="load" :loading="loading">{{ t('common.refresh') }}</el-button>
         <el-button type="danger" @click="clearAll">{{ t('audit.clear') }}</el-button>
@@ -70,7 +75,7 @@ onMounted(load);
       <el-table :data="items" v-loading="loading" empty-text="">
         <el-table-column :label="t('audit.col.time')" width="170"><template #default="{ row }">{{ fmtTime(row.time) }}</template></el-table-column>
         <el-table-column :label="t('audit.col.actor')" width="160"><template #default="{ row }">{{ row.actor || '-' }} <el-tag size="small" :type="row.role === 'admin' ? 'danger' : 'info'">{{ row.role || '' }}</el-tag></template></el-table-column>
-        <el-table-column :label="t('audit.col.action')" width="170"><template #default="{ row }">{{ row.action }}</template></el-table-column>
+        <el-table-column :label="t('audit.col.action')" width="170"><template #default="{ row }">{{ actionLabel(row.action) }}</template></el-table-column>
         <el-table-column :label="t('audit.col.target')" min-width="220"><template #default="{ row }">{{ row.target || '-' }}</template></el-table-column>
         <el-table-column :label="t('audit.col.detail')" min-width="300"><template #default="{ row }">{{ row.detail || '' }} <span v-if="row.ip" class="muted">· {{ row.ip }}</span></template></el-table-column>
       </el-table>

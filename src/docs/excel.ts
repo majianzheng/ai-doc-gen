@@ -98,9 +98,15 @@ export const xlsxGenerator: Generator = {
     const x = markdownToXlsx(String(input?.content || ''));
     input = x;
     const wb = new ExcelJS.Workbook();
+    // 模板的页面/打印设置（打印方向、纸张、缩放、页边距、网格线等）要继承到生成
+    // 的每个工作表：模板工作表在下面会被销毁，若不保留，新表将使用 ExcelJS 默认
+    // 设置，打印/显示外观与模板不一致（复用模板不完全）。
+    let tplPageSetup: Record<string, unknown> | undefined;
     if (ctx?.styleTemplate) {
       try {
         await wb.xlsx.load(ctx.styleTemplate as never);
+        const src = wb.worksheets[0]?.pageSetup;
+        if (src) tplPageSetup = JSON.parse(JSON.stringify(src)) as Record<string, unknown>;
         // Drop the template's own worksheets so we keep its theme/styles but
         // avoid sheet-name collisions when we add the requested sheets.
         for (const ws of wb.worksheets.slice()) {
@@ -115,6 +121,7 @@ export const xlsxGenerator: Generator = {
 
     for (const sheet of input.sheets) {
       const ws = wb.addWorksheet(sheet.name || 'Sheet1');
+      if (tplPageSetup) Object.assign((ws as any).pageSetup, tplPageSetup);
       writeSheet(ws, sheet);
       if (sheet.images?.length) {
         await writeSheetImages(wb, ws, sheet.images, sheet.rows.length);

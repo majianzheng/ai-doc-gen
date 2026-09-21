@@ -83,7 +83,6 @@ onMounted(load);
           <template #default="{ row }">
             <el-button size="small" text type="primary" @click="rename(row)">{{ t('users.rename') }}</el-button>
             <el-button v-if="row.role !== 'admin'" size="small" text type="warning" @click="setRole(row, 'admin')">{{ t('users.promote') }}</el-button>
-            <el-button v-else size="small" text type="warning" @click="setRole(row, 'user')">{{ t('users.demote') }}</el-button>
             <el-button size="small" text type="warning" @click="resetPwd(row)">{{ t('users.resetPwd') }}</el-button>
             <el-button size="small" text type="danger" @click="remove(row)">{{ t('common.action.delete') }}</el-button>
           </template>

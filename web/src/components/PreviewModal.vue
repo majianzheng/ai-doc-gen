@@ -29,6 +29,13 @@ async function render(raw, sheet) {
   if (!el || !props.file) return;
   const format = props.file.format;
   el.innerHTML = '';
+  if (format === 'text') {
+    const pre = document.createElement('pre');
+    pre.className = 'text-preview';
+    pre.textContent = new TextDecoder('utf-8').decode(raw);
+    el.appendChild(pre);
+    return;
+  }
   const V = window.AIDocViewers;
   if (!V || !V[viewerName(format)]) {
     if (format === 'pdf') {

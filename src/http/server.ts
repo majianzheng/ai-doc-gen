@@ -6,7 +6,7 @@ import type { DocumentService } from '../core.js';
 import type { Config } from '../config.js';
 import { createMcpServer } from '../mcp/server.js';
 import { LocalStorage } from '../storage/local.js';
-import { docxSchema, pdfSchema, xlsxSchema, pptxSchema } from '../docs/index.js';
+import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, textSchema } from '../docs/index.js';
 import type { DocFormat } from '../docs/types.js';
 
 const MAX_BODY = '25mb';
@@ -92,9 +92,9 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
   // ---- REST API (consumed by the Dify plugin & any HTTP client) ----
   app.post('/api/documents/:format', async (req, res) => {
     const format = req.params.format as DocFormat;
-    const schema = ({ docx: docxSchema, pdf: pdfSchema, xlsx: xlsxSchema, pptx: pptxSchema } as const)[format];
+    const schema = ({ docx: docxSchema, pdf: pdfSchema, xlsx: xlsxSchema, pptx: pptxSchema, text: textSchema } as const)[format];
     if (!schema) {
-      res.status(400).json({ error: `Unsupported format '${format}'. Supported: docx, pdf, xlsx, pptx` });
+      res.status(400).json({ error: `Unsupported format '${format}'. Supported: docx, pdf, xlsx, pptx, text` });
       return;
     }
     const styleTemplateId = (req.body as { styleTemplateId?: string } | undefined)?.styleTemplateId;
@@ -114,7 +114,7 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
   });
 
   app.get('/api/formats', (_req, res) => {
-    res.json(['docx', 'pdf', 'xlsx', 'pptx'].map((f) => ({
+    res.json(['docx', 'pdf', 'xlsx', 'pptx', 'text'].map((f) => ({
       format: f,
       endpoint: `/api/documents/${f}`,
       contentType: ({
@@ -122,6 +122,7 @@ export function createHttpApp(options: { config: Config; service: DocumentServic
         pdf: 'application/pdf',
         xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        text: 'text/plain',
       } as const)[f as DocFormat],
     })));
   });

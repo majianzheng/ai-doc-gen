@@ -5,7 +5,7 @@
  * that AI agents can reliably produce valid input) and returns a Buffer.
  */
 
-export type DocFormat = 'docx' | 'pdf' | 'xlsx' | 'pptx';
+export type DocFormat = 'docx' | 'pdf' | 'xlsx' | 'pptx' | 'text';
 
 export interface ParagraphItem {
   text: string;
@@ -126,6 +126,22 @@ export interface PptxInput {
   slides: SlideData[];
 }
 
+/**
+ * Plain-text document (txt / html / xml / json / 源码等)：无格式、不需要样式模板。
+ * `filename` 应包含扩展名（如 test.cpp、readme.md、note.txt）；扩展名决定下载的
+ * 文件名与 Content-Type。`encoding` 默认 utf-8；`lineEnding` 默认 lf。
+ */
+export interface TextInput {
+  /** 文件名（含扩展名，如 test.cpp / note.txt / index.html；缺省 .txt） */
+  filename?: string;
+  /** 纯文本内容 */
+  content: string;
+  /** 编码（默认 utf-8 不带 BOM）：utf-8/utf8（无 BOM）、utf-8-bom/utf8-bom（带 BOM）、ascii/latin1/utf-16le/utf16le/ucs2/base64/hex */
+  encoding?: string;
+  /** 行尾序列（默认 lf）：lf 或 crlf */
+  lineEnding?: string;
+}
+
 /** Result returned to the caller (MCP tool / REST API). */
 export interface GeneratedDocument {
   format: DocFormat;
@@ -146,6 +162,7 @@ export const MIME_TYPES: Record<DocFormat, string> = {
   pdf: 'application/pdf',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  text: 'text/plain',
 };
 
 export const FILE_EXTENSIONS: Record<DocFormat, string> = {
@@ -153,6 +170,7 @@ export const FILE_EXTENSIONS: Record<DocFormat, string> = {
   pdf: 'pdf',
   xlsx: 'xlsx',
   pptx: 'pptx',
+  text: 'txt',
 };
 
 export type DocInputs = {
@@ -160,4 +178,5 @@ export type DocInputs = {
   pdf: PdfInput;
   xlsx: XlsxInput;
   pptx: PptxInput;
+  text: TextInput;
 };

@@ -93,17 +93,38 @@ ${IMG_MD('整体架构示意')}
 - 完善在线生成界面
 - 模板定制与模板库建设
 `,
+  text: `#include <iostream>
+
+int main() {
+    // 纯文本文件：原样保存，不做任何排版
+    std::cout << "Hello, ai-doc!" << std::endl;
+    return 0;
+}
+`,
 };
+
+const TEXT_ENCODINGS = [
+  { value: 'utf-8', label: 'UTF-8（无 BOM）' },
+  { value: 'utf-8-bom', label: 'UTF-8（带 BOM）' },
+  { value: 'ascii', label: 'ASCII' },
+  { value: 'latin1', label: 'Latin-1' },
+  { value: 'utf-16le', label: 'UTF-16 LE' },
+  { value: 'base64', label: 'Base64' },
+  { value: 'hex', label: 'Hex' },
+];
 
 const format = ref('docx');
 const title = ref('');
 const filename = ref('');
 const content = ref('');
+const encoding = ref('utf-8');
+const lineEnding = ref('lf');
 const styleOptions = ref([]);
 const styleTemplateId = ref('');
 const generating = ref(false);
 const result = ref(null);
 
+const isText = computed(() => format.value === 'text');
 const currentDefault = computed(() => (state.styleDefaults || {})[format.value]);
 
 async function loadStyles() {
@@ -141,7 +162,15 @@ async function generate() {
   try {
     result.value = await api('/api/generate', {
       method: 'POST',
-      body: { format: format.value, title: title.value.trim(), filename: filename.value.trim(), content: content.value, styleTemplateId: styleTemplateId.value || undefined },
+      body: {
+        format: format.value,
+        title: isText.value ? undefined : title.value.trim(),
+        filename: filename.value.trim(),
+        content: content.value,
+        encoding: isText.value ? encoding.value : undefined,
+        lineEnding: isText.value ? lineEnding.value : undefined,
+        styleTemplateId: isText.value ? undefined : (styleTemplateId.value || undefined),
+      },
     });
     ElMessage.success(t('gen.genOk'));
   } catch (err) {
@@ -169,15 +198,27 @@ onMounted(async () => { await loadStyles(); if (state.meta && state.meta.formats
             <el-option value="pdf" label="PDF" />
             <el-option value="xlsx" label="Excel (.xlsx)" />
             <el-option value="pptx" label="PowerPoint (.pptx)" />
+            <el-option value="text" :label="t('gen.textOption')" />
           </el-select>
         </el-form-item>
-        <el-form-item :label="t('gen.title')">
+        <el-form-item v-if="!isText" :label="t('gen.title')">
           <el-input v-model="title" :placeholder="t('gen.titlePlaceholder')" />
         </el-form-item>
         <el-form-item :label="t('gen.filename')">
-          <el-input v-model="filename" :placeholder="t('gen.filenamePlaceholder')" />
+          <el-input v-model="filename" :placeholder="isText ? t('gen.filenameTextPlaceholder') : t('gen.filenamePlaceholder')" />
         </el-form-item>
-        <el-form-item :label="t('gen.style')">
+        <el-form-item v-if="isText" :label="t('gen.encoding')">
+          <el-select v-model="encoding">
+            <el-option v-for="e in TEXT_ENCODINGS" :key="e.value" :value="e.value" :label="e.label" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="isText" :label="t('gen.lineEnding')">
+          <el-select v-model="lineEnding">
+            <el-option value="lf" label="LF (\n)" />
+            <el-option value="crlf" label="CRLF (\r\n)" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="!isText" :label="t('gen.style')">
           <el-select v-model="styleTemplateId" clearable>
             <el-option :value="''" :label="t('gen.styleNone')" />
             <el-option v-for="s in styleOptions" :key="s.id" :value="s.id" :label="s.name + (s.system ? ' (system)' : '')" />
@@ -185,6 +226,7 @@ onMounted(async () => { await loadStyles(); if (state.meta && state.meta.formats
         </el-form-item>
       </el-form>
 
+      <div v-if="isText" class="editor-label">{{ t('gen.textContentLabel') }}</div>
       <div class="editor-toolbar">
         <el-button @click="loadExample">{{ t('gen.example') }}</el-button>
         <el-button @click="clearAll">{{ t('gen.clear') }}</el-button>

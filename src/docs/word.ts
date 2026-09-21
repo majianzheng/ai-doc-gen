@@ -240,199 +240,209 @@ async function buildDocument(input: DocxInput): Promise<Document> {
 }
 
 /**
- * Apply a style template by MERGING its styles/theme/fonts into the freshly
- * generated document, instead of blindly overwriting `styles.xml`.
- *
- * The generated document's `document.xml` references fixed style ids
- * (`Title`, `Heading1`...`Heading6`, `Normal`) that the docx library emits.
- * Many user templates only define numbered ids (`a`, `a0`..`a5`) with no
- * `Heading1` etc., so wholesale-replacing `styles.xml` makes every heading fall
- * back to body text. Here we:
- *   - start from the generated `styles.xml` (guarantees every referenced id exists),
- *   - overlay each template style by the SAME id so a user's custom look wins,
- *   - keep the generated heading/title definitions when the template lacks them,
- *   - theme + fontTable come from the template for its brand fonts.
- * This yields a readable layout that still honors a real template's styling.
+ * 以模板为基座应用样式模板（"完全复用"）：
+ * - 模板包里的**全部部件**（页眉/页脚、样式、主题、settings/webSettings、版面、
+ *   字体表、media、自定义 XML/属性等）原样保留；
+ * - 只把生成文档的正文（标题/目录/段落/表格/图片）替换进模板 `<w:body>`，
+ *   并保留模板自己的 sectPr（页眉页脚引用、页面尺寸/边距/文档网格）——
+ *   等价于"在 Word 里打开模板、只替换正文内容"，与模板完全一致。
+ * - 正文用到的样式按模板同名样式（w:name）映射；模板缺少的样式定义补进模板
+ *   styles.xml；列表编号(numbering)、内嵌图片(media + rels)合并时避开资源冲突。
  */
+function collectStyles(xml: string): Map<string, { name: string; xml: string }> {
+  const m = new Map<string, { name: string; xml: string }>();
+  const re = /<w:style\b[\s\S]*?<\/w:style>/g;
+  let hit: RegExpExecArray | null;
+  while ((hit = re.exec(xml))) {
+    const id = /w:styleId="([^"]+)"/.exec(hit[0])?.[1];
+    const name = /<w:name w:val="([^"]*)"/.exec(hit[0])?.[1] ?? '';
+    if (id) m.set(id, { name, xml: hit[0] });
+  }
+  return m;
+}
+
+/** word/media/imageN.ext 的最大序号（避免与模板已有图片资源冲突） */
+function maxDocMediaIndex(zip: JSZip): number {
+  let max = 0;
+  for (const p of Object.keys(zip.files)) {
+    const m = /^word\/media\/image(\d+)\.[a-zA-Z0-9]+$/.exec(p);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max;
+}
+
 async function applyStyleTemplate(generated: Buffer, template: Buffer): Promise<Buffer> {
   const gen = await JSZip.loadAsync(generated);
   const tpl = await JSZip.loadAsync(template);
+  const out = new JSZip();
 
-  const genStyles = await gen.file('word/styles.xml')?.async('string');
-  const tplStyles = await tpl.file('word/styles.xml')?.async('string');
-  if (genStyles && tplStyles) {
-    // collect each <w:style ...>...</w:style> by styleId
-    const collect = (xml: string): Map<string, string> => {
-      const m = new Map<string, string>();
-      const re = /<w:style\b[\s\S]*?<\/w:style>/g;
-      let hit: RegExpExecArray | null;
-      while ((hit = re.exec(xml))) {
-        const id = /w:styleId="([^"]+)"/.exec(hit[0])?.[1];
-        if (id) m.set(id, hit[0]);
+  // ---- 1) 模板全部部件原样复制（完全复用）----
+  for (const [path, file] of Object.entries(tpl.files)) {
+    if (file.dir) continue;
+    out.file(path, await file.async('uint8array'));
+  }
+
+  // ---- 2) 提取生成文档的正文（body 内、sectPr 之前）----
+  const genDoc = (await gen.file('word/document.xml')?.async('string')) ?? '';
+  let children = /<w:body>([\s\S]*?)<\/w:body>/.exec(genDoc)?.[1] ?? '';
+  children = children.replace(/<w:sectPr[\s\S]*?<\/w:sectPr>/g, '');
+
+  // ---- 3) 样式映射 + 补全：正文使用的样式优先映射到模板同名样式（w:name），
+  //        模板没有的（如某些自定标题样式）则把生成样式定义补进模板 styles.xml ----
+  const genStyles = (await gen.file('word/styles.xml')?.async('string')) ?? '';
+  const genStyleMap = collectStyles(genStyles);
+  const tplStyles = (await out.file('word/styles.xml')?.async('string')) ?? '<w:styles/>';
+  const tplStyleMap = collectStyles(tplStyles);
+  const nameToTplId = new Map<string, string>();
+  for (const [id, s] of tplStyleMap) if (s.name) nameToTplId.set(s.name.toLowerCase(), id);
+
+  const needed = new Set<string>();
+  for (const m of children.matchAll(/w:(?:pStyle|rStyle) w:val="([^"]+)"/g)) needed.add(m[1]);
+
+  let stylesXml = tplStyles;
+  const styleRemap = new Map<string, string>();
+  for (const id of needed) {
+    const gs = genStyleMap.get(id);
+    if (!gs) continue;
+    const tplId = nameToTplId.get(gs.name.toLowerCase());
+    if (tplId) { styleRemap.set(id, tplId); continue; }
+    if (!tplStyleMap.has(id) && !stylesXml.includes(`w:styleId="${id}"`)) {
+      stylesXml = stylesXml.replace('</w:styles>', `${gs.xml}</w:styles>`);
+    }
+  }
+  for (const [id, mapped] of styleRemap) {
+    children = children.replace(new RegExp(`w:(pStyle|rStyle) w:val="${id}"`, 'g'), `w:$1 w:val="${mapped}"`);
+  }
+  if (stylesXml !== tplStyles) out.file('word/styles.xml', stylesXml);
+
+  // ---- 4) 列表编号（项目符号）：合并/复制模板 numbering.xml，并重映射正文 numId ----
+  const genNumbering = (await gen.file('word/numbering.xml')?.async('string')) ?? '';
+  if (/<w:numId\b/.test(children) && genNumbering) {
+    const tplNumbering = (await out.file('word/numbering.xml')?.async('string')) ?? '';
+    const maxNum = tplNumbering ? Math.max(0, ...[...tplNumbering.matchAll(/<w:num w:numId="(\d+)"/g)].map((m) => Number(m[1]))) : 0;
+    const maxAbs = tplNumbering ? Math.max(0, ...[...tplNumbering.matchAll(/<w:abstractNum w:abstractNumId="(\d+)"/g)].map((m) => Number(m[1]))) : 0;
+    const absMap = new Map<number, number>();
+    const numMap = new Map<number, number>();
+    let nextAbs = maxAbs + 1;
+    let nextNum = maxNum + 1;
+
+    const absBlocks = [...genNumbering.matchAll(/<w:abstractNum\b[\s\S]*?<\/w:abstractNum>/g)].map((m) => m[0]);
+    const numBlocks = [...genNumbering.matchAll(/<w:num\b[\s\S]*?<\/w:num>/g)].map((m) => m[0]);
+
+    const rebuiltAbs = absBlocks.map((b) => b.replace(/<w:abstractNum w:abstractNumId="(\d+)"/, (mm, n: string) => {
+      const nn = nextAbs++;
+      absMap.set(Number(n), nn);
+      return `<w:abstractNum w:abstractNumId="${nn}"`;
+    }));
+
+    const rebuiltNums = numBlocks.map((b) => {
+      const oldNum = Number(/<w:num w:numId="(\d+)"/.exec(b)?.[1]);
+      const nn = nextNum++;
+      numMap.set(oldNum, nn);
+      return b
+        .replace(/<w:num w:numId="(\d+)"/, `<w:num w:numId="${nn}"`)
+        .replace(/<w:abstractNumId w:val="(\d+)"\s*\/>/, (mm, a: string) => `<w:abstractNumId w:val="${absMap.get(Number(a)) ?? a}"/>`);
+    });
+
+    const genNumRe = rebuiltAbs.join('') + rebuiltNums.join('');
+    // docx 库的 numbering 可能引用 w14/w15 等命名空间，重建时必须保留完整的
+    // 根元素命名空间声明，否则 XML 命名空间未声明、文档无效。
+    const genNumRoot = /<w:numbering[^>]*>/.exec(genNumbering)?.[0]
+      ?? '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">';
+    if (tplNumbering) {
+      let tplNum = tplNumbering;
+      for (const a of genNumRoot.matchAll(/xmlns:[a-zA-Z0-9]+="[^"]*"/g)) {
+        const name = a[0].slice(0, a[0].indexOf('='));
+        if (!tplNum.includes(name + '=')) tplNum = tplNum.replace(/<w:numbering/, `<w:numbering ${a[0]}`);
       }
-      return m;
+      out.file('word/numbering.xml', tplNum.replace('</w:numbering>', `${genNumRe}</w:numbering>`));
+    } else {
+      out.file('word/numbering.xml', genNumRoot + genNumRe + '</w:numbering>');
+      // 接线：document.xml.rels + Content-Type
+      const relsPath = 'word/_rels/document.xml.rels';
+      const rels = (await out.file(relsPath)?.async('string')) ?? '';
+      let rid = Math.max(0, ...[...rels.matchAll(/Id="rId(\d+)"/g)].map((m) => Number(m[1]))) + 1;
+      let newRid: string;
+      do { newRid = 'rId' + rid++; } while (rels.includes(`Id="${newRid}"`));
+      out.file(relsPath, rels.replace('</Relationships>',
+        `<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/></Relationships>`));
+      const ctPath = '[Content_Types].xml';
+      const ct = (await out.file(ctPath)?.async('string')) ?? '';
+      if (!ct.includes('PartName="/word/numbering.xml"')) {
+        out.file(ctPath, ct.replace('</Types>', '<Override ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml" PartName="/word/numbering.xml"/></Types>'));
+      }
+    }
+    for (const [oldN, newN] of numMap) {
+      children = children.split(`w:numId w:val="${oldN}"`).join(`w:numId w:val="${newN}"`);
+    }
+  }
+
+  // ---- 5) 内嵌图片：复制生成文档 media 到模板包（不冲突命名），并重映射 r:embed ----
+  const IMG_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
+  const genRels = (await gen.file('word/_rels/document.xml.rels')?.async('string')) ?? '';
+  const tplRelsPath = 'word/_rels/document.xml.rels';
+  const tplRels = (await out.file(tplRelsPath)?.async('string')) ?? '';
+  let mediaIdx = maxDocMediaIndex(out);
+  let ridNext = Math.max(0, ...[...tplRels.matchAll(/Id="rId(\d+)"/g)].map((m) => Number(m[1]))) + 1;
+  let tplRelsNew = tplRels;
+  const embedMap = new Map<string, string>();
+  const newExts = new Set<string>();
+  for (const m of genRels.matchAll(/<Relationship Id="([^"]+)" Type="([^"]+)" Target="([^"]+)"/g)) {
+    if (m[2] !== IMG_REL) continue;
+    const target = m[3].replace(/^\.\.\//, '');
+    const gf = gen.file('word/' + target);
+    if (!gf) continue;
+    const ext = /\.([a-zA-Z0-9]+)$/.exec(target)?.[1] ?? 'png';
+    mediaIdx += 1;
+    const newName = `media/image${mediaIdx}.${ext}`;
+    out.file('word/' + newName, await gf.async('uint8array'));
+    let newRid: string;
+    do { newRid = 'rId' + ridNext++; } while (tplRelsNew.includes(`Id="${newRid}"`));
+    tplRelsNew = tplRelsNew.replace('</Relationships>', `<Relationship Id="${newRid}" Type="${IMG_REL}" Target="${newName}"/></Relationships>`);
+    embedMap.set(m[1], newRid);
+    newExts.add(ext);
+  }
+  if (tplRelsNew !== tplRels) out.file(tplRelsPath, tplRelsNew);
+  // 新增图片扩展名需注册 Content-Type（如模板只有 jpeg 而正文带 png），否则包无效。
+  // 注意 OOXML 要求所有 <Default> 位于所有 <Override> 之前，必须按序插入。
+  if (newExts.size) {
+    const ctPath = '[Content_Types].xml';
+    const ct = (await out.file(ctPath)?.async('string')) ?? '';
+    const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', svg: 'image/svg+xml', webp: 'image/webp' };
+    const insertDefault = (xml: string, def: string): string => {
+      const m = /(<Default\b[^>]*\/>\s*)+/.exec(xml);
+      if (m) {
+        const idx = m.index + m[0].length;
+        return xml.slice(0, idx) + def + xml.slice(idx);
+      }
+      return xml.replace(/^([\s\S]*?<[^>]*Types[^>]*>)/, `$1${def}`);
     };
-    const genMap = collect(genStyles);
-    const tplMap = collect(tplStyles);
-    const merged = new Map<string, string>(genMap); // start from generated (all ids exist)
-    for (const [id, xml] of tplMap) {
-      // If the template has a "real" heading id (Heading1 etc.) it wins; otherwise
-      // keep the generated one so title/headings never degrade to body text.
-      if (/^(Title|Heading[1-6])$/i.test(id)) merged.set(id, xml);
-      else merged.set(id, xml);
+    let ctNew = ct;
+    for (const e of newExts) {
+      if (ctNew.includes(`Extension="${e}"`)) continue;
+      const mt = MIME[e];
+      if (!mt) continue;
+      ctNew = insertDefault(ctNew, `<Default Extension="${e}" ContentType="${mt}"/>`);
     }
-    // Preserve generated heading/title styles that the template lacks entirely
-    for (const [id, xml] of genMap) {
-      if (/^(Title|Heading[1-6])$/i.test(id) && !tplMap.has(id)) merged.set(id, xml);
-    }
-    // docDefaults: prefer template's (fonts/paragraph defaults), else generated
-    const tplDefaults = /<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(tplStyles)?.[0];
-    const genDefaults = /<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(genStyles)?.[0];
-    const defaults = tplDefaults || genDefaults || '';
-    const styleList = [...merged.values()].join('');
-    const nextGen = genStyles.replace(/<w:style\b[\s\S]*?<\/w:style>/g, '').replace(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/g, '');
-    // rebuild: keep everything **before** <w:styles> body (latentStyles etc.) minimal
-    const header = /(<w:styles[^>]*>)/.exec(genStyles)?.[1] ?? '<w:styles>';
-    const tail = '</w:styles>';
-    gen.file('word/styles.xml', `${header}${defaults}${styleList}${tail}`);
+    if (ctNew !== ct) out.file(ctPath, ctNew);
+  }
+  for (const [oldRid, newRid] of embedMap) {
+    children = children.split(`r:embed="${oldRid}"`).join(`r:embed="${newRid}"`);
   }
 
-  // theme + fontTable from template (brand fonts / colors)
-  for (const part of ['word/theme/theme1.xml', 'word/fontTable.xml']) {
-    const file = tpl.file(part);
-    if (file) gen.file(part, await file.async('string'));
+  // ---- 6) 替换模板 body：保留模板自身的 sectPr（页眉页脚引用/页面设置/网格）----
+  const tplDoc = (await out.file('word/document.xml')?.async('string')) ?? '';
+  const tplSect = /<w:sectPr[\s\S]*?<\/w:sectPr>/.exec(tplDoc)?.[0] ?? '';
+  const newBody = `<w:body>${children}${tplSect}</w:body>`;
+  out.file('word/document.xml', tplDoc.replace(/<w:body>[\s\S]*?<\/w:body>/, newBody));
+
+  // ---- 7) settings.xml 补 updateFields（目录域自动刷新）----
+  const settings = (await out.file('word/settings.xml')?.async('string')) ?? '';
+  if (settings && !settings.includes('<w:updateFields')) {
+    out.file('word/settings.xml', settings.replace('</w:settings>', '<w:updateFields/></w:settings>'));
   }
 
-  // ---- 移植模板的页眉/页脚（含其引用的图片等资源）----
-  await copyTemplateHeaderFooter(gen, tpl);
-
-  return Buffer.from(await gen.generateAsync({ type: 'nodebuffer' }));
-}
-
-/**
- * Copy the template's header / footer Parts (and any resources they reference,
- * e.g. logos in word/media/*) into the freshly generated docx, and wire them up
- * via the document's sectPr (headerReference / footerReference) + rels.
- *
- * IMPORTANT (OOXML validity):
- *  - The header/footer part and its own .rels share an *internal* rId namespace
- *    (e.g. header2.xml references r:embed="rId1" -> header2.xml.rels rId1). We must
- *    copy BOTH verbatim so the pairing stays intact — never rewrite those rIds.
- *  - Only the *document-level* relationship (document.xml.rels -> headerN.xml) and
- *    the sectPr headerReference/footerReference use a NEW rId, allocated here.
- *  - Some templates (esp. WPS) declare headerReference/footerReference with
- *    w:type="first"/"even" but never set `evenAndOddHeaders`/`titlePg`, which Word
- *    treats as corrupt. To stay safe we only wire up the `default` page type and
- *    pick the most content-rich header/footer part (+ its resources).
- */
-async function copyTemplateHeaderFooter(gen: JSZip, tpl: JSZip): Promise<void> {
-  const genDocRelsName = 'word/_rels/document.xml.rels';
-  let genDocRels = (await gen.file(genDocRelsName)?.async('string')) ?? '';
-  const used = new Set<string>([...genDocRels.matchAll(/Id="(rId\d+)"/g)].map((m) => m[1]));
-  let next = 1;
-  const newId = (): string => { let id: string; do { id = 'rId' + next++; } while (used.has(id)); used.add(id); return id; };
-
-  // ---- 1) 读取模板 document.xml.rels：rId -> part path ----
-  const tplDocRels = (await tpl.file(genDocRelsName)?.async('string')) ?? '';
-  const tplRelMap = new Map<string, string>();
-  for (const m of tplDocRels.matchAll(/<Relationship Id="([^"]+)" Type="([^"]+)" Target="([^"]+)"/g)) {
-    const [, rid, type, target] = m;
-    if (/header$|footer$/.test(type)) tplRelMap.set(rid, 'word/' + target);
-  }
-
-  // ---- 2) 从模板 sectPr 得到一堆 (kind, type, partPath) 引用，只保留 default ----
-  const tplDocXml = (await tpl.file('word/document.xml')?.async('string')) ?? '';
-  const sectPr = /<w:sectPr[\s\S]*?<\/w:sectPr>/.exec(tplDocXml)?.[0] ?? '';
-  const candidates: Array<{ kind: 'header' | 'footer'; type: string; part: string }> = [];
-  for (const m of sectPr.matchAll(/<w:(headerReference|footerReference) w:type="([^"]+)" r:id="([^"]+)"/g)) {
-    const kind = (m[1] as 'headerReference' | 'footerReference') === 'headerReference' ? 'header' : 'footer';
-    const part = tplRelMap.get(m[3]);
-    if (part) candidates.push({ kind, type: m[2], part });
-  }
-  if (!candidates.length) return;
-
-  // ---- 3) 选 default 部件；若无 default，选内容最丰富的那个 ----
-  const richness = (p: string): number => {
-    const f = tpl.file(p);
-    return f ? f.async('string').then((x) => x.length).catch(() => 0) as unknown as number : 0;
-  };
-  const pick = async (kind: 'header' | 'footer'): Promise<string | null> => {
-    const list = candidates.filter((c) => c.kind === kind);
-    if (!list.length) return null;
-    const def = list.find((c) => c.type === 'default');
-    if (def) return def.part;
-    // fall back to the largest part (most content)
-    const sizes: Array<{ part: string; n: number }> = [];
-    for (const c of list) sizes.push({ part: c.part, n: await richness(c.part) });
-    sizes.sort((a, b) => b.n - a.n);
-    return sizes[0]?.part ?? null;
-  };
-
-  const headerPart = await pick('header');
-  const footerPart = await pick('footer');
-
-  // ---- 4) 拷贝选中的 header/footer 部件 + 它们的 .rels + 引用资源（原样，内部 rId 不动）----
-  const copyPart = async (part: string, kind: 'header' | 'footer'): Promise<string> => {
-    const base = part.split('/').pop() as string;
-    // 部件本身 + 其 .rels 原样拷贝（内部 rId 自洽）
-    gen.file(part, await tpl.file(part)!.async('nodebuffer'));
-    const relsPath = 'word/_rels/' + base + '.rels';
-    const relStr = (await tpl.file(relsPath)?.async('string')) ?? '';
-    if (relStr) {
-      gen.file(relsPath, relStr);
-      // 拷贝其引用的资源（如 media/image1.jpeg、引用文档等），保持相同内部 rId
-      for (const rm of relStr.matchAll(/<Relationship Id="([^"]+)" Type="([^"]+)" Target="([^"]+)"/g)) {
-        const [, , rtype, rtarget] = rm;
-        if (/^https?:|\/wordmedia\//.test(rtarget)) continue;
-        const targetName = 'word/' + rtarget.replace(/^\.\//, '');
-        const tf = tpl.file(targetName);
-        if (tf) gen.file(targetName, await tf.async('nodebuffer'));
-        // 若目标还有自己的 rels（如 header 引用到 image 的 caption 等），一并拷贝
-        const rtRels = 'word/_rels/' + targetName.split('/').pop() + '.rels';
-        const rf = tpl.file(rtRels);
-        if (rf) gen.file(rtRels, await rf.async('string'));
-      }
-    }
-    // document.xml.rels 顶层关联（新 rId 指向该部件）
-    const gid = newId();
-    const relType = kind === 'header'
-      ? 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/header'
-      : 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer';
-    genDocRels = genDocRels.replace('</Relationships>', `<Relationship Id="${gid}" Type="${relType}" Target="${base}"/></Relationships>`);
-    gen.file(genDocRelsName, genDocRels);
-    return gid;
-  };
-
-  const hId = headerPart ? await copyPart(headerPart, 'header') : null;
-  const fId = footerPart ? await copyPart(footerPart, 'footer') : null;
-
-  // ---- 5) 注册 header/footer 部件的 Content-Type（OOXML 必需，否则 Word 报"无法读取内容"）----
-  // docx 库生成的 [Content_Types].xml 不含模板新增的 header/footer 部件声明。
-  const ctName = '[Content_Types].xml';
-  const ctXml = (await gen.file(ctName)?.async('string')) ?? '';
-  let ct = ctXml;
-  const addOverride = (partName: string, contentType: string): void => {
-    if (ct.includes(`PartName="${partName}"`)) return;
-    ct = ct.replace('</Types>', `<Override ContentType="${contentType}" PartName="${partName}"/></Types>`);
-  };
-  if (headerPart) {
-    const base = headerPart.split('/').pop() as string;
-    addOverride(`/word/${base}`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml');
-  }
-  if (footerPart) {
-    const base = footerPart.split('/').pop() as string;
-    addOverride(`/word/${base}`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml');
-  }
-  if (ct !== ctXml) gen.file(ctName, ct);
-
-  // ---- 6) 写 sectPr：仅 default 引用 ----
-  const genDocXml = (await gen.file('word/document.xml')?.async('string')) ?? '';
-  if (genDocXml.includes('<w:sectPr>')) {
-    let refs = '';
-    if (hId) refs += `<w:headerReference w:type="default" r:id="${hId}"/>`;
-    if (fId) refs += `<w:footerReference w:type="default" r:id="${fId}"/>`;
-    if (refs) gen.file('word/document.xml', genDocXml.replace('<w:sectPr>', `<w:sectPr>${refs}`));
-  }
+  return Buffer.from(await out.generateAsync({ type: 'nodebuffer' }));
 }
 
 export const docxGenerator: Generator = {

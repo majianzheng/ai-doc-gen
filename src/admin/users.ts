@@ -165,9 +165,10 @@ export class UserStore {
     const user = this.get(username);
     if (!user) return { ok: false, error: 'user not found' };
     if (role !== 'admin' && role !== 'user') return { ok: false, error: 'invalid role' };
+    // Admin accounts are permanent — once an account is an admin it can never be
+    // demoted. Admins (and only admins) created via SSO seed are managed here.
     if (role === 'user' && user.role === 'admin') {
-      const admins = this.users.filter((u) => u.role === 'admin' && u.username !== username);
-      if (admins.length === 0) return { ok: false, error: 'cannot demote the last admin account' };
+      return { ok: false, error: 'admin accounts cannot be demoted' };
     }
     user.role = role;
     user.updatedAt = new Date().toISOString();

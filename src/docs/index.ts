@@ -4,18 +4,21 @@ import { docxGenerator } from './word.js';
 import { pdfGenerator } from './pdf.js';
 import { xlsxGenerator } from './excel.js';
 import { pptxGenerator } from './ppt.js';
-import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema } from './schemas.js';
+import { textGenerator } from './text.js';
+import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, textSchema, docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema, textAdminSchema } from './schemas.js';
 
 docxGenerator.inputSchema = docxSchema;
 pdfGenerator.inputSchema = pdfSchema;
 xlsxGenerator.inputSchema = xlsxSchema;
 pptxGenerator.inputSchema = pptxSchema;
+textGenerator.inputSchema = textSchema;
 
 const registry = new Map<DocFormat, Generator>([
   ['docx', docxGenerator],
   ['pdf', pdfGenerator],
   ['xlsx', xlsxGenerator],
   ['pptx', pptxGenerator],
+  ['text', textGenerator],
 ]);
 
 export function getGenerator(format: DocFormat): Generator {
@@ -28,4 +31,4 @@ export function listGenerators(): Generator[] {
   return Array.from(registry.values());
 }
 
-export { docxSchema, pdfSchema, xlsxSchema, pptxSchema, docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema };
+export { docxSchema, pdfSchema, xlsxSchema, pptxSchema, textSchema, docxAdminSchema, pdfAdminSchema, xlsxAdminSchema, pptxAdminSchema, textAdminSchema };

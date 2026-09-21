@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { DocumentService } from '../core.js';
-import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, listGenerators } from '../docs/index.js';
+import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, textSchema, listGenerators } from '../docs/index.js';
 import type { GeneratedDocument } from '../docs/types.js';
 
 /**
@@ -26,6 +26,16 @@ import type { GeneratedDocument } from '../docs/types.js';
 /** Interaction contract embedded in every tool description: the agent must
  *  announce that generation started before calling, then present the result
  *  (or the failure reason) immediately after the call returns. */
+/** 调用前提，嵌入每个工具描述：仅当用户明确要求生成文件时才调用，否则直接在
+ *  对话里查看/回答，避免动不动就生成文件打扰用户。 */
+const USAGE_GATE = [
+  '',
+  '调用前提（务必遵守，避免打扰用户）:',
+  '仅当用户【明确要求】生成文件（如“保存/下载/导出为文件/发我文件”）时才调用本工具；',
+  '若用户只是询问内容、想看效果或了解信息，直接在对话中展示内容/回答，【不要】调用本工具；',
+  '不确定时，先询问用户是否需要保存为文件，而不是直接生成。',
+].join('\n');
+
 const INTERACTION_DOC = [
   '',
   '交互契约（务必遵守，避免用户误以为“卡住”）:',
@@ -132,6 +142,7 @@ export function createMcpServer(service: DocumentService): McpServer {
         '| 月份 | 收入（万元） |',
         '| 7月 | 120 |',
         '| 8月 | 141 |',
+        USAGE_GATE,
         INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
@@ -162,6 +173,7 @@ export function createMcpServer(service: DocumentService): McpServer {
         '| 商品 | 单价 |',
         '| 键盘 | 199 |',
         '| 鼠标 | 89 |',
+        USAGE_GATE,
         INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
@@ -194,6 +206,7 @@ export function createMcpServer(service: DocumentService): McpServer {
         '| 月份 | 收入 |',
         '| 4月 | 92 |',
         '| 5月 | 105 |',
+        USAGE_GATE,
         INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
@@ -225,6 +238,7 @@ export function createMcpServer(service: DocumentService): McpServer {
         '| 渠道 | 增幅 |',
         '| 线上 | +25% |',
         '| 线下 | 0% |',
+        USAGE_GATE,
         INTERACTION_DOC,
         COMMON_RETURN,
       ].join('\n'),
@@ -234,6 +248,33 @@ export function createMcpServer(service: DocumentService): McpServer {
     async (args: Record<string, unknown>) => {
       const { styleTemplateId, filename, username, ...rest } = args;
       return generateSafe(() => service.generate('pptx', rest as never, { styleTemplateId: styleTemplateId as string | undefined, filename: filename as string | undefined, owner: username as string | undefined }));
+    },
+  );
+
+  server.registerTool(
+    'generate_text_file',
+    {
+      title: 'Generate Text File',
+      description: [
+        '生成纯文本文件（txt / html / xml / json / 各种源码等）并返回下载链接。无格式、无样式模板，给定什么内容就存什么。',
+        '',
+        '必填：username、filename（**必须包含扩展名**，如 test.cpp、readme.md、index.html、data.json、note.txt）、content（纯文本）。',
+        '可选：encoding（编码，默认 utf-8，支持 utf-8/ascii/latin1/utf-16le/base64/hex 等）、lineEnding（行尾，lf 或 crlf，默认 lf）。',
+        '',
+        '示例:',
+        '{ "username": "zhangsan", "filename": "main.cpp", "content": "#include <iostream>\\nint main() { return 0; }", "lineEnding": "lf" }',
+        '',
+        '注意：content 是纯文本，**不经过 Markdown 解析**；filename 的扩展名决定 Content-Type 与下载文件名。',
+        USAGE_GATE,
+        INTERACTION_DOC,
+        COMMON_RETURN,
+      ].join('\n'),
+      inputSchema: textSchema,
+      outputSchema: COMMON_OUTPUT_SCHEMA as any,
+    },
+    async (args: Record<string, unknown>) => {
+      const { filename, username, ...rest } = args;
+      return generateSafe(() => service.generate('text', rest as never, { filename: filename as string | undefined, owner: username as string | undefined }));
     },
   );
 

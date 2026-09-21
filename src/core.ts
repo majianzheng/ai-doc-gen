@@ -35,6 +35,42 @@ export function resolveOutputFilename(requested: string | undefined, extension: 
   return hexFallback;
 }
 
+/**
+ * 纯文本文件的名（txt/html/xml/源码等）：与 resolveOutputFilename 不同，
+ * **保留调用者传入的扩展名**（扩展名决定类型），仅清理路径/非法字符；
+ * 未提供时回退 note.txt。
+ */
+export function resolveTextFilename(requested?: string, inputFilename?: string): string {
+  for (const candidate of [requested, inputFilename]) {
+    if (typeof candidate !== 'string' || candidate.trim() === '') continue;
+    const base = candidate.replace(/\\/g, '/').split('/').pop() ?? '';
+    const cleaned = base
+      .replace(/[^\p{L}\p{N} _.-]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100);
+    if (cleaned === '') continue;
+    return /\.[A-Za-z0-9]{1,10}$/.test(cleaned) ? cleaned : `${cleaned}.txt`;
+  }
+  return 'note.txt';
+}
+
+/** 由文本文件扩展名推导 MIME（默认 text/plain）。 */
+export function textMimeType(filename: string): string {
+  const ext = (filename.split('.').pop() ?? '').toLowerCase();
+  const map: Record<string, string> = {
+    txt: 'text/plain', text: 'text/plain', log: 'text/plain',
+    md: 'text/markdown', markdown: 'text/markdown',
+    html: 'text/html', htm: 'text/html',
+    xml: 'application/xml', json: 'application/json',
+    css: 'text/css', csv: 'text/csv',
+    js: 'text/javascript', mjs: 'text/javascript', cjs: 'text/javascript',
+    yml: 'text/yaml', yaml: 'text/yaml',
+    svg: 'image/svg+xml',
+  };
+  return map[ext] ?? 'text/plain';
+}
+
 /** Deterministically map a username to a filesystem-safe storage path segment
  *  used to scope generated files per user (see DocumentService.generate). */
 export function ownerSlug(username: string): string {
@@ -63,11 +99,12 @@ export class DocumentService {
     opts: { styleTemplateId?: string; filename?: string; owner?: string; role?: string } = {},
   ): Promise<GeneratedDocument> {
     const generator = getGenerator(format);
+    const isText = format === 'text';
 
     // ---- author defaults to the calling user unless the AI specified one ----
     const owner = opts.owner?.trim();
     let input = rawInput;
-    if (owner && format !== 'xlsx') {
+    if (owner && format !== 'xlsx' && !isText) {
       const authorField = (rawInput as { author?: string }).author;
       if (!authorField || !authorField.trim()) {
         input = { ...rawInput, author: owner } as DocInputs[F];
@@ -75,24 +112,27 @@ export class DocumentService {
     }
 
     // ---- style template resolution (per-owner fallback chain) ----
+    // 纯文本不带格式，不套用任何样式模板。
     let styleTemplate: Buffer | undefined;
-    if (opts.styleTemplateId) {
-      if (!this.styleTemplates) throw new Error('style templates are not configured');
-      const tpl = await this.styleTemplates.get(opts.styleTemplateId);
-      if (!tpl) throw new Error(`style template '${opts.styleTemplateId}' not found`);
-      if (tpl.format !== format) {
-        throw new Error(`style template format '${tpl.format}' does not match target format '${format}'`);
-      }
-      // A caller identified by username may only use their own or system templates.
-      if (owner && tpl.owner !== 'system' && tpl.owner !== owner) {
-        throw new Error(`style template '${opts.styleTemplateId}' is not available to '${owner}'`);
-      }
-      styleTemplate = tpl.buffer;
-    } else if (this.styleTemplates) {
-      const resolved = await this.styleTemplates.resolveDefault(format, owner);
-      if (resolved) {
-        const tpl = await this.styleTemplates.get(resolved);
-        if (tpl && tpl.format === format) styleTemplate = tpl.buffer;
+    if (!isText) {
+      if (opts.styleTemplateId) {
+        if (!this.styleTemplates) throw new Error('style templates are not configured');
+        const tpl = await this.styleTemplates.get(opts.styleTemplateId);
+        if (!tpl) throw new Error(`style template '${opts.styleTemplateId}' not found`);
+        if (tpl.format !== format) {
+          throw new Error(`style template format '${tpl.format}' does not match target format '${format}'`);
+        }
+        // A caller identified by username may only use their own or system templates.
+        if (owner && tpl.owner !== 'system' && tpl.owner !== owner) {
+          throw new Error(`style template '${opts.styleTemplateId}' is not available to '${owner}'`);
+        }
+        styleTemplate = tpl.buffer;
+      } else if (this.styleTemplates) {
+        const resolved = await this.styleTemplates.resolveDefault(format, owner);
+        if (resolved) {
+          const tpl = await this.styleTemplates.get(resolved);
+          if (tpl && tpl.format === format) styleTemplate = tpl.buffer;
+        }
       }
     }
 
@@ -103,13 +143,17 @@ export class DocumentService {
     const fallbackTitle = typeof (rawInput as { title?: unknown }).title === 'string'
       ? ((rawInput as { title: string }).title)
       : undefined;
-    const fileName = resolveOutputFilename(opts.filename, generator.extension, fallbackTitle);
+    // 纯文本：保留调用者扩展名并按扩展名推导 MIME；其余格式按原逻辑补扩展名。
+    const fileName = isText
+      ? resolveTextFilename(opts.filename, typeof (rawInput as { filename?: unknown }).filename === 'string' ? (rawInput as { filename: string }).filename : undefined)
+      : resolveOutputFilename(opts.filename, generator.extension, fallbackTitle);
+    const mimeType = isText ? textMimeType(fileName) : generator.mimeType;
     const key = `${base}/${fileName}`;
     const keyCleaned = key.split('/').filter(Boolean).join('/');
 
     const stored = await this.storage.put(buffer, {
       key: keyCleaned,
-      mimeType: generator.mimeType,
+      mimeType,
     });
 
     this.audit?.record({

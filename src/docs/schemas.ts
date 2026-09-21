@@ -178,6 +178,34 @@ export const pptxSchema = z.object({
 });
 
 // ============================================================================
+// Plain-text documents (txt / html / xml / json / source code etc.)
+// ============================================================================
+
+const encodingEnum = z.enum([
+  'utf-8', 'utf8', 'utf-8-bom', 'utf8-bom', 'ascii', 'latin1', 'ucs2', 'utf-16le', 'utf16le', 'base64', 'hex',
+]).describe('文本编码（默认 utf-8，无 BOM）。utf-8 / utf8 为不带 BOM 的 UTF-8；utf-8-bom / utf8-bom 为带 BOM（EF BB BF 头）的 UTF-8；另支持 ascii / latin1 / utf-16le / utf16le / ucs2 / base64 / hex');
+
+const lineEndingEnum = z.enum(['lf', 'crlf']).describe('行尾序列（默认 lf）：lf = \\n，crlf = \\r\\n');
+
+export const textSchema = z.object({
+  username: usernameReq,
+  filename: requiredText(
+    'filename',
+    '下载文件的完整名称，必须带扩展名（扩展名决定类型与下载文件名），例如 test.cpp、readme.md、index.html、note.txt',
+    200,
+  ).describe(
+    '必填 REQUIRED：下载文件的完整名称，**必须包含扩展名**（如 test.cpp / readme.md / index.html / data.json / note.txt）。'
+    + '扩展名决定 Content-Type 与浏览器展示方式；txt/html/xml/json/js/css/各种源码均可。',
+  ),
+  content: requiredText('content', '纯文本内容（原样保存，不做任何格式转换）', 5_000_000).describe(
+    '必填 REQUIRED：纯文本内容（原样保存）。适合：txt 笔记、HTML 页面、XML/JSON 数据、C/Java/TS/Python 等源码、Markdown 文件、配置等。'
+    + '注意：此内容不经过 Markdown 解析，给定什么就存什么。',
+  ),
+  encoding: encodingEnum.optional(),
+  lineEnding: lineEndingEnum.optional(),
+});
+
+// ============================================================================
 // Internal / admin schemas (caller identity & filename come from the session /
 // a separate field, so username / filename / title remain optional here).
 // ============================================================================
@@ -222,4 +250,12 @@ export const pptxAdminSchema = z.object({
   slides: z.array(slideData).min(1, { message: '至少需要 1 页内容' }).describe('首页之后的内容页'),
   styleTemplateId: z.string().optional().describe('（可选）已上传 .pptx 样式模板的 uuid'),
   filename: filenameReq.optional().describe('（可选）下载文件名（不含扩展名）；缺省时由系统根据标题自动推导'),
+});
+
+export const textAdminSchema = z.object({
+  username: usernameReq.optional().describe('（可选）用户名；缺省时使用当前登录用户'),
+  filename: z.string().optional().describe('（可选）下载文件名（含扩展名，如 test.cpp / note.txt）；缺省 note.txt'),
+  content: z.string({ required_error: 'content 是必填项 —— 纯文本内容' }).describe('必填：纯文本内容（原样保存）'),
+  encoding: encodingEnum.optional(),
+  lineEnding: lineEndingEnum.optional(),
 });

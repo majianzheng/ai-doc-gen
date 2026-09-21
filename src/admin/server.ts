@@ -7,7 +7,7 @@ import { ownerSlug } from '../core.js';
 import type { Config } from '../config.js';
 import type { Storage, StorageObjectInfo } from '../storage/storage.js';
 import { MIME_TYPES, type DocFormat } from '../docs/types.js';
-import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, listGenerators } from '../docs/index.js';
+import { docxSchema, pdfSchema, xlsxSchema, pptxSchema, textSchema, listGenerators } from '../docs/index.js';
 import { StyleTemplateStore, SYSTEM_OWNER } from './styleTemplates.js';
 import { AuditLogStore } from './audit.js';
 import { UserStore } from './users.js';
@@ -17,9 +17,15 @@ import { createAuth, type AuthContext } from './auth.js';
 
 // Admin flows provide the caller identity from the logged-in session and the
 // file name separately, so they use the relaxed (admin) input schemas.
-const FORMAT_SCHEMAS = { docx: docxSchema, pdf: pdfSchema, xlsx: xlsxSchema, pptx: pptxSchema } as const;
-const SUPPORTED_FORMATS: DocFormat[] = ['docx', 'pdf', 'xlsx', 'pptx'];
+const FORMAT_SCHEMAS = { docx: docxSchema, pdf: pdfSchema, xlsx: xlsxSchema, pptx: pptxSchema, text: textSchema } as const;
+const SUPPORTED_FORMATS: DocFormat[] = ['docx', 'pdf', 'xlsx', 'pptx', 'text'];
 const STYLE_FORMATS: ('pptx' | 'docx' | 'xlsx')[] = ['pptx', 'docx', 'xlsx'];
+
+/** 常见纯文本扩展名（txt/html/xml/json/js/css/源码等）——用于从存储 key 推断 text 格式。 */
+const TEXT_FILE_EXTS = new Set([
+  'txt', 'text', 'md', 'markdown', 'html', 'htm', 'xml', 'json', 'css', 'csv', 'log', 'ini', 'conf', 'yml', 'yaml',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'java', 'c', 'h', 'cpp', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'sh', 'bat', 'ps1', 'sql', 'toml', 'vue', 'svg',
+]);
 
 function b64url(s: string): string {
   return Buffer.from(s, 'utf8').toString('base64url');
@@ -31,8 +37,10 @@ function fromB64url(s: string): string {
 
 function formatFromKey(key: string): DocFormat | null {
   const ext = key.split('.').pop()?.toLowerCase();
-  if (!ext || !SUPPORTED_FORMATS.includes(ext as DocFormat)) return null;
-  return ext as DocFormat;
+  if (!ext) return null;
+  if (SUPPORTED_FORMATS.includes(ext as DocFormat)) return ext as DocFormat;
+  if (TEXT_FILE_EXTS.has(ext)) return 'text';
+  return null;
 }
 
 /** Style templates are file-based; their format is determined by the uploaded
@@ -480,7 +488,7 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
   // ---- generation (results always owned by the logged-in user) ----
   app.post('/api/generate', auth.requireAuth, async (req, res) => {
     if (!req.user) return;
-    const b = (req.body ?? {}) as { format?: DocFormat; filename?: string; title?: string; content?: string; author?: string; subject?: string; footer?: string; styleTemplateId?: string };
+    const b = (req.body ?? {}) as { format?: DocFormat; filename?: string; title?: string; content?: string; author?: string; subject?: string; footer?: string; encoding?: string; lineEnding?: string; styleTemplateId?: string };
     if (!b.format || !SUPPORTED_FORMATS.includes(b.format)) {
       res.status(400).json({ error: `unsupported format '${b.format}'. Supported: ${SUPPORTED_FORMATS.join(', ')}` });
       return;
@@ -495,6 +503,8 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
     if (b.author !== undefined) input.author = b.author;
     if (b.subject !== undefined) input.subject = b.subject;
     if (b.footer !== undefined) input.footer = b.footer;
+    if (b.encoding !== undefined) input.encoding = b.encoding;
+    if (b.lineEnding !== undefined) input.lineEnding = b.lineEnding;
     if (b.styleTemplateId) input.styleTemplateId = b.styleTemplateId;
     const parsed = FORMAT_SCHEMAS[format].safeParse(input);
     if (!parsed.success) {

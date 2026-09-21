@@ -95,8 +95,11 @@ onMounted(async () => { await load(); });
 
     <el-card>
       <el-table :data="files" v-loading="loading" empty-text="">
-        <el-table-column :label="t('files.col.name')" min-width="260">
-          <template #default="{ row }">{{ row.name }}</template>
+        <el-table-column :label="t('files.col.name')" min-width="300">
+          <template #default="{ row }">
+            <span class="file-name">{{ row.name }}</span>
+            <span class="owner-tag" :class="{ system: row.owner === 'system' }">{{ row.owner || 'system' }}</span>
+          </template>
         </el-table-column>
         <el-table-column :label="t('files.col.format')" width="90">
           <template #default="{ row }"><span v-html="formatBadge(row.format)"></span></template>
