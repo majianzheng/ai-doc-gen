@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit';
 import { fileURLToPath } from 'node:url';
-import type { ImageItem, ParagraphItem, PdfInput } from './types.js';
+import type { ImageItem, ParagraphItem, PdfInput, DocxFlowItem } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
 import { markdownToPdf } from './markdown.js';
 import { computeSize, resolveImage, resolveImageCached, svgToPng } from './images.js';
@@ -70,43 +70,49 @@ async function imageForPdf(resolved: Awaited<ReturnType<typeof resolveImage>>): 
   );
 }
 
+async function renderOneImage(
+  doc: PDFKit.PDFDocument,
+  img: ImageItem,
+  imgCache?: Awaited<ReturnType<typeof resolveImageCached>>,
+): Promise<void> {
+  const resolved = imgCache ? await imgCache.get(img) : await resolveImage(img);
+  const renderable = await imageForPdf(resolved);
+
+  let intrinsic: { width: number; height: number } | null = null;
+  if (resolved.kind !== 'svg') {
+    try {
+      const opened = (doc as PDFKit.PDFDocument & { openImage: (src: Buffer) => { width: number; height: number } }).openImage(renderable.buffer);
+      intrinsic = { width: opened.width, height: opened.height };
+    } catch {
+      intrinsic = null;
+    }
+  }
+  const availW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const size = computeSize({ width: resolved.width, height: resolved.height }, intrinsic, Math.min(400, availW));
+  const dw = Math.min(size.width, availW);
+  const dh = size.height * (dw / size.width);
+
+  if (doc.y + dh > doc.page.height - doc.page.margins.bottom) doc.addPage();
+  let x = doc.page.margins.left;
+  if (resolved.align === 'center') x = (doc.page.width - dw) / 2;
+  else if (resolved.align === 'right') x = doc.page.width - doc.page.margins.right - dw;
+
+  doc.image(renderable.buffer, x, doc.y, { width: dw, height: dh });
+  doc.y += dh;
+  if (resolved.caption) {
+    doc.moveDown(0.2);
+    doc.font(FONT_REG).fontSize(9).fillColor('#666666')
+      .text(resolved.caption, { align: 'center' });
+  }
+  doc.moveDown(0.6);
+}
+
 function renderImages(
   doc: PDFKit.PDFDocument,
   images: ImageItem[],
   imgCache?: Awaited<ReturnType<typeof resolveImageCached>>,
 ): Promise<void> {
-  const tasks = images.map(async (img) => {
-    const resolved = imgCache ? await imgCache.get(img) : await resolveImage(img);
-    const renderable = await imageForPdf(resolved);
-
-    let intrinsic: { width: number; height: number } | null = null;
-    if (resolved.kind !== 'svg') {
-      try {
-        const opened = (doc as PDFKit.PDFDocument & { openImage: (src: Buffer) => { width: number; height: number } }).openImage(renderable.buffer);
-        intrinsic = { width: opened.width, height: opened.height };
-      } catch {
-        intrinsic = null;
-      }
-    }
-    const availW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const size = computeSize({ width: resolved.width, height: resolved.height }, intrinsic, Math.min(400, availW));
-    const dw = Math.min(size.width, availW);
-    const dh = size.height * (dw / size.width);
-
-    if (doc.y + dh > doc.page.height - doc.page.margins.bottom) doc.addPage();
-    let x = doc.page.margins.left;
-    if (resolved.align === 'center') x = (doc.page.width - dw) / 2;
-    else if (resolved.align === 'right') x = doc.page.width - doc.page.margins.right - dw;
-
-    doc.image(renderable.buffer, x, doc.y, { width: dw, height: dh });
-    doc.y += dh;
-    if (resolved.caption) {
-      doc.moveDown(0.2);
-      doc.font(FONT_REG).fontSize(9).fillColor('#666666')
-        .text(resolved.caption, { align: 'center' });
-    }
-    doc.moveDown(0.6);
-  });
+  const tasks = images.map((img) => renderOneImage(doc, img, imgCache));
   return Promise.all(tasks).then(() => undefined);
 }
 
@@ -226,57 +232,66 @@ function renderPdf(input: PdfInput, opts: PdfRenderOptions): Promise<Buffer | Ma
       doc.moveDown();
     }
 
-    // ---- body paragraphs; headings get a named destination + outline ----
-    for (const p of input.paragraphs ?? []) {
-      const style = fontStyle(p);
-      doc.font(fontName(style, p.text)).fontSize(style.size).fillColor(p.color ?? '#131313');
-      const pOpts = p.align ? { align: p.align } : undefined;
-      const lv = p.level ?? 0;
-      const isHeading = lv >= 1 && lv <= 6;
-      const indentOpt = (!isHeading && !p.bullet) ? { indent: 24 } : {};
-      if (isHeading) {
-        const id = tocIdFor(toc, headIdx++);
-        if (collect) pageOf.set(id, pageCounter);
-        // addNamedDestination 不在 @types/pdfkit 中，但 PDFKit 0.15 运行时支持该 API
-        (doc as unknown as { addNamedDestination: (name: string) => void }).addNamedDestination(id);
-        doc.outline.addItem(p.text, { expanded: false });
-      }
-      if (p.bullet) {
-        doc.text('•  ', Object.assign({ continued: true }, pOpts));
-        doc.text(p.text, Object.assign({}, pOpts, indentOpt));
-      } else {
-        doc.text(p.text, Object.assign({}, pOpts, indentOpt));
-      }
-      doc.moveDown(0.4);
-    }
+    // ---- body: 按内容顺序混排段落/表格/图片（图片在 Markdown 原位置渲染）----
+    const flow: DocxFlowItem[] = input.items ?? [
+      ...(input.paragraphs ?? []).map((p) => ({ type: 'paragraph' as const, value: p })),
+      ...(input.tables ?? []).map((t) => ({ type: 'table' as const, value: t })),
+      ...(input.images ?? []).map((img) => ({ type: 'image' as const, value: img })),
+    ];
 
-    // ---- tables ----
-    for (const t of input.tables ?? []) {
-      doc.moveDown();
-      const cols = t.columns ?? Object.keys(t.rows[0] ?? {}).map((k) => ({ key: k, header: k }));
-      const available = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-      const colW = available / cols.length;
-      const drawRow = (cells: string[], header: boolean) => {
-        doc.font(header ? FONT_BOLD : FONT_REG).fontSize(9);
-        const rowH = Math.max(...cells.map((c) => doc.heightOfString(c, { width: colW - 8 })), 18) + 8;
-        if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) { doc.addPage(); if (collect) pageCounter++; }
-        const y = doc.y;
-        cells.forEach((c, i) => {
-          const x = doc.page.margins.left + i * colW;
-          doc.rect(x, y, colW, rowH).strokeColor('#cccccc').lineWidth(0.5).stroke();
-          if (header) doc.rect(x, y, colW, rowH).fillColor('#f2f2f2').fill();
-          doc.fillColor('#131313').fontSize(9);
-          doc.text(c, x + 4, y + 4, { width: colW - 8 });
-        });
-        doc.y = y + rowH;
-      };
-      drawRow(cols.map((c: { header: string }) => c.header), true);
-      for (const row of t.rows) drawRow(cols.map((c: { key: string }) => String(row[c.key] ?? '')), false);
-      doc.moveDown(0.6);
-    }
+    const renderFlow = async (): Promise<void> => {
+      for (const it of flow) {
+        if (it.type === 'paragraph') {
+          const p = it.value;
+          const style = fontStyle(p);
+          doc.font(fontName(style, p.text)).fontSize(style.size).fillColor(p.color ?? '#131313');
+          const pOpts = p.align ? { align: p.align } : undefined;
+          const lv = p.level ?? 0;
+          const isHeading = lv >= 1 && lv <= 6;
+          const indentOpt = (!isHeading && !p.bullet) ? { indent: 24 } : {};
+          if (isHeading) {
+            const id = tocIdFor(toc, headIdx++);
+            if (collect) pageOf.set(id, pageCounter);
+            // addNamedDestination 不在 @types/pdfkit 中，但 PDFKit 0.15 运行时支持该 API
+            (doc as unknown as { addNamedDestination: (name: string) => void }).addNamedDestination(id);
+            doc.outline.addItem(p.text, { expanded: false });
+          }
+          if (p.bullet) {
+            doc.text('•  ', Object.assign({ continued: true }, pOpts));
+            doc.text(p.text, Object.assign({}, pOpts, indentOpt));
+          } else {
+            doc.text(p.text, Object.assign({}, pOpts, indentOpt));
+          }
+          doc.moveDown(0.4);
+        } else if (it.type === 'table') {
+          const t = it.value;
+          doc.moveDown();
+          const cols = t.columns ?? Object.keys(t.rows[0] ?? {}).map((k) => ({ key: k, header: k }));
+          const available = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+          const colW = available / cols.length;
+          const drawRow = (cells: string[], header: boolean) => {
+            doc.font(header ? FONT_BOLD : FONT_REG).fontSize(9);
+            const rowH = Math.max(...cells.map((c) => doc.heightOfString(c, { width: colW - 8 })), 18) + 8;
+            if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) { doc.addPage(); if (collect) pageCounter++; }
+            const y = doc.y;
+            cells.forEach((c, i) => {
+              const x = doc.page.margins.left + i * colW;
+              doc.rect(x, y, colW, rowH).strokeColor('#cccccc').lineWidth(0.5).stroke();
+              if (header) doc.rect(x, y, colW, rowH).fillColor('#f2f2f2').fill();
+              doc.fillColor('#131313').fontSize(9);
+              doc.text(c, x + 4, y + 4, { width: colW - 8 });
+            });
+            doc.y = y + rowH;
+          };
+          drawRow(cols.map((c: { header: string }) => c.header), true);
+          for (const row of t.rows) drawRow(cols.map((c: { key: string }) => String(row[c.key] ?? '')), false);
+          doc.moveDown(0.6);
+        } else {
+          await renderOneImage(doc, it.value, opts.images);
+        }
+      }
+    };
 
-    renderImages(doc, input.images ?? [], opts.images)
-      .then(() => doc.end())
-      .catch((err) => doc.emit('error', err));
+    renderFlow().then(() => doc.end()).catch((err) => doc.emit('error', err));
   });
 }

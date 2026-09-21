@@ -60,6 +60,13 @@ export interface ImageItem {
   position?: { x: number; y: number; w?: number; h?: number };
 }
 
+/** 文档正文流：按 Markdown 中出现顺序混排的段落/表格/图片（docx/pdf 按此渲染，
+ *  保证图片位置与其在正文中的位置一致，而不是全部堆到末尾）。 */
+export type DocxFlowItem =
+  | { type: 'paragraph'; value: ParagraphItem }
+  | { type: 'table'; value: TableData }
+  | { type: 'image'; value: ImageItem };
+
 export interface DocxInput {
   title?: string;
   author?: string;
@@ -68,6 +75,8 @@ export interface DocxInput {
   tables?: TableData[];
   /** images appended after the paragraphs/tables */
   images?: ImageItem[];
+  /** 按内容顺序混排的正文流；提供时 word/pdf 优先按它渲染（图片随位置） */
+  items?: DocxFlowItem[];
   footer?: string;
 }
 
@@ -79,6 +88,8 @@ export interface PdfInput {
   tables?: TableData[];
   /** images appended after the paragraphs/tables */
   images?: ImageItem[];
+  /** 按内容顺序混排的正文流；提供时 word/pdf 优先按它渲染（图片随位置） */
+  items?: DocxFlowItem[];
   footer?: string;
 }
 

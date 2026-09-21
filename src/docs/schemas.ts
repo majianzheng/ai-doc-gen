@@ -135,7 +135,7 @@ const slideData = z.object({
 /**
  * 正文（Markdown）必填定义 —— 用一段 Markdown 表达文档内容，避免复杂嵌套参数。
  */
-const contentReq = requiredText('content', '文档正文（Markdown），必须提供', 200000).describe(
+const contentReq = requiredText('content', '文档正文（Markdown），必须提供', 2_000_000).describe(
   '必填 REQUIRED：文档正文，Markdown 格式。支持：# 标题(#一级/##二级/...)、- 列表要点、**加粗**、*斜体*、| 表头 | 单元格 | 表格、![说明](图片url或data:)。直接给一段标准 Markdown 即可。'
 );
 

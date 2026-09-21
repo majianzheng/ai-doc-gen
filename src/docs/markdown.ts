@@ -154,13 +154,33 @@ function firstHeading(md: string): string | undefined {
 
 export function markdownToDocx(md: string): DocxInput {
   const blocks = parseBlocks(md);
-  const out: DocxInput = { paragraphs: [], tables: [], images: [] };
+  const out: DocxInput = { paragraphs: [], tables: [], images: [], items: [] };
   for (const b of blocks) {
-    if (b.kind === 'heading') out.paragraphs!.push({ text: cleanInline(b.text), level: b.level });
-    else if (b.kind === 'list') b.items.forEach((it) => out.paragraphs!.push({ text: cleanInline(it), bullet: true }));
-    else if (b.kind === 'para') { const p = paraItem(b.text); if (p.text) out.paragraphs!.push(p); }
-    else if (b.kind === 'table') out.tables!.push(tableToData(b.rows));
-    else if (b.kind === 'image') out.images!.push(imageItem(b.url, b.alt, { cell: b.cell, position: b.position }));
+    if (b.kind === 'heading') {
+      const p = { text: cleanInline(b.text), level: b.level };
+      out.paragraphs!.push(p);
+      out.items!.push({ type: 'paragraph', value: p });
+    } else if (b.kind === 'list') {
+      b.items.forEach((it) => {
+        const p = { text: cleanInline(it), bullet: true };
+        out.paragraphs!.push(p);
+        out.items!.push({ type: 'paragraph', value: p });
+      });
+    } else if (b.kind === 'para') {
+      const p = paraItem(b.text);
+      if (p.text) {
+        out.paragraphs!.push(p);
+        out.items!.push({ type: 'paragraph', value: p });
+      }
+    } else if (b.kind === 'table') {
+      const t = tableToData(b.rows);
+      out.tables!.push(t);
+      out.items!.push({ type: 'table', value: t });
+    } else if (b.kind === 'image') {
+      const img = imageItem(b.url, b.alt, { cell: b.cell, position: b.position });
+      out.images!.push(img);
+      out.items!.push({ type: 'image', value: img });
+    }
   }
   if (!out.title) out.title = firstHeading(md);
   return out;

@@ -17,7 +17,7 @@ import {
   type IParagraphOptions,
 } from 'docx';
 import JSZip from 'jszip';
-import type { DocxInput, ImageItem, ParagraphItem, TableData } from './types.js';
+import type { DocxInput, DocxFlowItem, ImageItem, ParagraphItem, TableData } from './types.js';
 import type { Generator, GenerateContext } from './generator.js';
 import { computeSize, intrinsicSize, resolveImage, svgToPng } from './images.js';
 import { markdownToDocx } from './markdown.js';
@@ -209,15 +209,22 @@ async function buildDocument(input: DocxInput): Promise<Document> {
     children.push(new Paragraph({ children: [] }));
   }
 
-  for (const p of input.paragraphs ?? []) children.push(paragraphToDocx(p));
+  // 正文按内容顺序流式渲染：图片出现在 Markdown 中原位置，而不是全部堆到末尾。
+  const flow: DocxFlowItem[] = input.items ?? [
+    ...(input.paragraphs ?? []).map((p) => ({ type: 'paragraph' as const, value: p })),
+    ...(input.tables ?? []).map((t) => ({ type: 'table' as const, value: t })),
+    ...(input.images ?? []).map((img) => ({ type: 'image' as const, value: img })),
+  ];
 
-  for (const t of input.tables ?? []) {
-    children.push(new Paragraph({ children: [] }));
-    children.push(tableToDocx(t));
-  }
-
-  for (const img of input.images ?? []) {
-    children.push(...(await imageToDocxParagraphs(img)));
+  for (const it of flow) {
+    if (it.type === 'paragraph') {
+      children.push(paragraphToDocx(it.value));
+    } else if (it.type === 'table') {
+      children.push(new Paragraph({ children: [] }));
+      children.push(tableToDocx(it.value));
+    } else {
+      children.push(...(await imageToDocxParagraphs(it.value)));
+    }
   }
 
   return new Document({
