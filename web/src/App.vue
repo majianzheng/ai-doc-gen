@@ -50,6 +50,12 @@ async function bootstrap() {
     if (r && r.user) { state.user = r.user; loadMeta(); return; }
   } catch { /* not logged in */ }
   try { const s = await api('/api/auth/sso-status'); ssoEnabled.value = !!(s && s.enabled); } catch { /* ignore */ }
+  // 自动登录：认证中心（IdP）已登录的用户进入网站时直接完成 SSO 登录并进入主界面；
+  // 用户主动退出（?local=1）或 SSO 失败（?ssoerror=）时停留在登录页（页面上仍提供
+  // “统一登录”按钮可供手动点击）。
+  if (ssoEnabled.value && !e && q.get('local') !== '1') {
+    window.location.href = '/login/sso';
+  }
 }
 
 async function doLogin() {
@@ -67,7 +73,9 @@ async function doLogin() {
 
 async function doLogout() {
   try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
-  state.user = null;
+  // 整页回到登录页并标记 ?local=1：重新加载会拉取 sso-status（保证“统一登录”
+  // 按钮正确显示），同时暂停自动 SSO 跳转，让用户停留在登录页（可再手动点统一登录）。
+  window.location.href = '/?local=1';
 }
 
 function onTheme() {
