@@ -156,11 +156,11 @@ export class StyleTemplateStore {
     }
   }
 
-  /** Whether `actor` is allowed to manage the template: the owner himself, or
-   *  an admin for the system templates (admins manage everything else too via
-   *  the admin UI, but a normal user can only touch their own). */
+  /** 是否允许 `actor` 管理该模板：管理员可管理全部；普通用户只能管理自己上传的
+   *  模板（不能动 system 模板，也不能动别人的）。模板本身对所有登录用户可见可用。 */
   canManage(meta: StyleTemplateMeta, actor: { username: string; role: string }): boolean {
-    if (meta.owner === SYSTEM_OWNER) return actor.role === 'admin';
+    if (actor.role === 'admin') return true;
+    if (meta.owner === SYSTEM_OWNER) return false;
     return meta.owner === actor.username;
   }
 

@@ -116,17 +116,14 @@ export class DocumentService {
     let styleTemplate: Buffer | undefined;
     if (!isText) {
       if (opts.styleTemplateId) {
-        if (!this.styleTemplates) throw new Error('style templates are not configured');
-        const tpl = await this.styleTemplates.get(opts.styleTemplateId);
-        if (!tpl) throw new Error(`style template '${opts.styleTemplateId}' not found`);
-        if (tpl.format !== format) {
-          throw new Error(`style template format '${tpl.format}' does not match target format '${format}'`);
-        }
-        // A caller identified by username may only use their own or system templates.
-        if (owner && tpl.owner !== 'system' && tpl.owner !== owner) {
-          throw new Error(`style template '${opts.styleTemplateId}' is not available to '${owner}'`);
-        }
-        styleTemplate = tpl.buffer;
+      if (!this.styleTemplates) throw new Error('style templates are not configured');
+      const tpl = await this.styleTemplates.get(opts.styleTemplateId);
+      if (!tpl) throw new Error(`style template '${opts.styleTemplateId}' not found`);
+      if (tpl.format !== format) {
+        throw new Error(`style template format '${tpl.format}' does not match target format '${format}'`);
+      }
+      // 模板对所有登录用户开放：任何已上传的模板都可选用（删除/设默认仍限本人或管理员）。
+      styleTemplate = tpl.buffer;
       } else if (this.styleTemplates) {
         const resolved = await this.styleTemplates.resolveDefault(format, owner);
         if (resolved) {

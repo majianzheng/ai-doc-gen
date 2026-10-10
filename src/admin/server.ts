@@ -330,13 +330,13 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
     }
   });
 
-  // ---- style templates (per-user: system templates are read-only for users) ----
+  // ---- style templates (visible to everyone; only the owner (or an admin)
+  //      can delete/manage a template) ----
   app.get('/api/style-templates', auth.requireAuth, async (req, res) => {
     try {
       if (!req.user) return;
       const admin = isAdmin(req);
-      const viewScope = admin ? 'all' : req.user.username;
-      const list = await styleTemplates.list(viewScope);
+      const list = await styleTemplates.list('all');
       const systemDefaults = (await styleTemplates.getDefaults()) as Record<string, string | undefined>;
       const ownDefaults = admin ? {} : ((await styleTemplates.getDefaultsFor(req.user.username)) as Record<string, string | undefined>);
       const active = await Promise.all(
@@ -458,18 +458,13 @@ export function createAdminApp(options: AdminAppOptions): express.Express {
   });
 
   // ---- serve a style template's raw file (preview inline / download) ----
-  // Visibility mirrors list(scope): admins see every template; a normal user
-  // sees the system templates plus their own.
+  // 模板对所有已登录用户开放下载/预览（所有人可见）；删除/设默认仍受 canManage 约束。
   app.get('/api/style-templates/:id/content', auth.requireAuth, async (req, res) => {
     try {
       if (!req.user) return;
       const meta = await styleTemplates.get(req.params.id);
       if (!meta) {
         res.status(404).json({ error: 'style template not found' });
-        return;
-      }
-      if (!isAdmin(req) && meta.owner !== SYSTEM_OWNER && meta.owner !== req.user.username) {
-        res.status(403).json({ error: 'forbidden' });
         return;
       }
       const disposition = req.query.disposition === 'attachment' ? 'attachment' : 'inline';
